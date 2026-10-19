@@ -7,7 +7,21 @@ import { mockPriceProvider } from "@/lib/providers/mockPrices";
 import { ruleAdvice } from "@/lib/ai";
 beforeAll(() => { process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "ps-")); delete process.env.OPENAI_API_KEY; delete process.env.PAYPAL_CLIENT_ID; });
 describe("catalog", () => {
-  it("matches fuzzy names", () => { expect(matchProduct("best price on sony xm5?")?.id).toBe("sony-wh1000xm5"); expect(matchProduct("kindle")?.id).toBe("kindle-paperwhite"); expect(matchProduct("zzz")).toBeNull(); });
+  it("matches fuzzy names", () => { 
+    expect(matchProduct("best price on sony xm5?")?.id).toBe("sony-wh1000xm5"); 
+    expect(matchProduct("kindle")?.id).toBe("kindle-paperwhite"); 
+    expect(matchProduct("zzz")).toBeNull(); 
+  });
+  it("rejects low-confidence matches without brand", () => {
+    expect(matchProduct("iPhone Duo")).toBeNull();
+    expect(matchProduct("duo")).toBeNull();
+  });
+  it("matches with brand even if generic word present", () => {
+    expect(matchProduct("instant pot duo")?.id).toBe("instant-pot-duo");
+  });
+  it("still matches full phrase", () => {
+    expect(matchProduct("Instant Pot Duo 7-in-1")?.id).toBe("instant-pot-duo");
+  });
 });
 describe("deals", () => {
   const o = { retailer: "A", price: 200, shipping: 5, inStock: true, url: "", source: "mock" as const };
