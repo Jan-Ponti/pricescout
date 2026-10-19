@@ -5,3 +5,4 @@ node_modules
 data/
 *.zip
 next-env.d.ts
+tsconfig.tsbuildinfo

@@ -2,19 +2,13 @@ services:
   - type: web
     name: pricescout
     runtime: node
-    plan: starter            # a persistent disk requires a paid plan; on free, SQLite resets on each deploy/restart
+    plan: free               # free plan: no persistent disk, SQLite lives in ./data and resets on redeploy/restart/spin-down
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /api/status
-    disk:
-      name: pricescout-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 20
-      - key: DATA_DIR
-        value: /var/data
       - key: PAYPAL_ENV
         value: sandbox
       - key: PAYPAL_CLIENT_ID
@@ -45,17 +39,7 @@ services:
         sync: false
       - key: ALERT_SMS_TO
         sync: false
-  - type: cron
-    name: pricescout-price-check
-    runtime: node
-    schedule: "0 * * * *"    # hourly
-    buildCommand: "true"
-    startCommand: 'curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/check-prices"'
-    envVars:
-      - key: APP_URL
-        sync: false          # set to the web service URL, e.g. https://pricescout.onrender.com
-      - key: CRON_SECRET
-        fromService:
-          type: web
-          name: pricescout
-          envVarKey: CRON_SECRET
+# No Render cron job (cron jobs are not available on the free plan).
+# Scheduled price checks: point a free external pinger (e.g. cron-job.org or a GitHub
+# Actions schedule) at POST $APP_URL/api/cron/check-prices with
+# 'Authorization: Bearer $CRON_SECRET', or use the in-app "Simulate price drop" button.

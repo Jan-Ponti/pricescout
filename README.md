@@ -10,7 +10,7 @@ Submission for the **PayPal AI Hackathon** (Devpost). Tell PriceScout what you w
 3. **Coupon finder.** Pluggable `CouponProvider`s. Each code is checked against the offer (min spend, caps, expired codes) and the best one is applied per retailer.
 4. **Price-history chart** (Recharts) with **1W / 1M / 3M / 1Y / All** ranges, a per-retailer breakdown, and the **lowest price + date** highlighted. Snapshots are stored in **SQLite** (sql.js, file at `DATA_DIR/prices.sqlite`), and every lookup and cron run adds a snapshot, so the history grows over time.
 5. **AI buy/wait advice** based on the 90-day average and the all-time low.
-6. **Price-drop alerts.** Watch a product with an optional target price. A scheduled checker (`/api/cron/check-prices`, run by a Render cron job) re-prices it, records a snapshot, and notifies you when the price falls to or below your target or drops ≥1% from the last check. Each alert includes the new price, the drop amount, the retailer, the coupon, and a one-click **Buy with PayPal** link that opens the approval checkout.
+6. **Price-drop alerts.** Watch a product with an optional target price. A scheduled checker (`/api/cron/check-prices`, run by an external scheduler or manually) re-prices it, records a snapshot, and notifies you when the price falls to or below your target or drops ≥1% from the last check. Each alert includes the new price, the drop amount, the retailer, the coupon, and a one-click **Buy with PayPal** link that opens the approval checkout.
    Channels sit behind a `NotificationChannel` interface:
    - **In-app notification center** (always on, fallback)
    - **Browser Web Push** (service worker + VAPID; no paid service; keys auto-generated if unset)
@@ -62,10 +62,15 @@ Checks: `npm run lint`, `npm test` (vitest), `npm run build`. With the app runni
 - **Web Push:** run `npm run vapid` (or rely on auto-generated keys), open the app, and click **Enable browser push**. Push needs `localhost` or HTTPS. Click a notification's action to land on the approval checkout.
 - **Email (Resend):** create an API key at resend.com and set `RESEND_API_KEY` and `ALERT_EMAIL_TO`. Without a verified domain, Resend's `onboarding@resend.dev` sender can only send to your own account email. **Email (SMTP):** set `SMTP_*` instead.
 - **SMS (Twilio):** set the `TWILIO_*` vars and `ALERT_SMS_TO`. A trial account can only text verified numbers.
-- **Scheduled checks:** `curl -X POST -H "Authorization: Bearer $CRON_SECRET" $APP_URL/api/cron/check-prices`. On Render this runs hourly from the cron service in `render.yaml`.
+- **Scheduled checks:** `curl -X POST -H "Authorization: Bearer $CRON_SECRET" $APP_URL/api/cron/check-prices`. On Render's free plan, trigger it from an external scheduler (see Deploy to Render).
 
 ### Deploy to Render
-`render.yaml` defines the `pricescout` web service (with a 1 GB disk at `/var/data` for SQLite) and the `pricescout-price-check` hourly cron job. Create a Blueprint from the repo and fill in the `sync: false` secrets. Set `APP_URL` on the cron job to the web URL. A persistent disk needs a paid instance; on the free plan, history resets on redeploy, but seeded history is regenerated automatically.
+`render.yaml` defines a single `pricescout` web service on Render's **free plan**. Create a Blueprint from the repo and fill in the `sync: false` secrets.
+
+**Free-plan notes**
+- **No persistent disk.** SQLite lives in `./data` on the instance's ephemeral filesystem, so watches, alerts, push subscriptions and orders reset on every redeploy, restart or idle spin-down. Price history is reseeded automatically (deterministic 2-year demo history is generated the first time a product is looked up), so the chart always works. To keep data, switch to the Starter plan and add a disk with `DATA_DIR=/var/data`.
+- **No Render cron job** (not free). For scheduled checks, use a free external scheduler (e.g. cron-job.org or a GitHub Actions `schedule`) to `POST $APP_URL/api/cron/check-prices` with `Authorization: Bearer $CRON_SECRET` (copy the generated value from the Render dashboard). For demos, use **⚡ Simulate price drop**.
+- Free instances sleep after ~15 minutes idle; the first request takes ~30-60s to wake.
 
 ## Architecture
 ```
@@ -90,7 +95,7 @@ lib/ai.ts               OpenAI calls + deterministic fallback
 2. **0:20 Chat.** Click *"Find me the best price on Sony WH-1000XM5"*. Point out the LLM badge and that the agent identified the product from free text.
 3. **0:40 Compare + coupons.** Show 5 retailers ranked by *effective* price, the auto-applied codes (NEWBUYER15), and an expired code being rejected.
 4. **1:05 History.** Switch 1W → 1M → 1Y → All and show the lowest-price marker and date. Toggle *By retailer*. Read the AI's buy/wait advice.
-5. **1:30 Alerts.** Set a target, click **Watch price** and **Enable browser push**, then **⚡ Simulate price drop**. Show the push/in-app/email alert with new price, drop, retailer and coupon. Mention the hourly Render cron job.
+5. **1:30 Alerts.** Set a target, click **Watch price** and **Enable browser push**, then **⚡ Simulate price drop**. Show the push/in-app/email alert with new price, drop, retailer and coupon. Mention that an external scheduler can run the check hourly.
 6. **2:05 Buy.** Click **Buy with PayPal** in the alert to open the approval modal with the line items. Click **Approve & pay with PayPal**, which creates the order via the PayPal Agent Toolkit and redirects to PayPal sandbox. Log in as the sandbox buyer and approve; the order is captured on return. (Or use **Instant sandbox test-card pay** to show `COMPLETED` with the capture id.)
 7. **2:40 Close.** Architecture slide: pluggable providers and channels, Agent Toolkit tools behind human approval, SQLite history that grows. "Agentic commerce that saves money, not just clicks."
 
