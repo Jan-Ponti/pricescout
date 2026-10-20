@@ -17,7 +17,10 @@ export async function identifyProduct(message: string): Promise<{ product: Produ
         ],
       });
       const id = JSON.parse(r.choices[0].message.content || "{}").id;
-      return { product: CATALOG.find((p) => p.id === id) ?? matchProduct(message), via: "llm" };
+      if (id === null) return { product: null, via: "llm" };
+      const product = CATALOG.find((p) => p.id === id);
+      if (product) return { product, via: "llm" };
+      return { product: matchProduct(message), via: "rules" };
     } catch (e) { console.warn("LLM identify failed, using rules:", (e as Error).message); }
   }
   return { product: matchProduct(message), via: "rules" };

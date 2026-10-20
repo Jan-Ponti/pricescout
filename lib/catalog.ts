@@ -10,19 +10,32 @@ export const CATALOG: Product[] = [
   { id: "logitech-mx-master-3s", name: "Logitech MX Master 3S Wireless Mouse", brand: "Logitech", category: "Accessories", image: "🖱️", msrp: 99.99, aliases: ["mx master", "logitech mouse", "mouse", "mx master 3s"] },
 ];
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+const GENERIC_MODEL_WORDS = new Set(["duo", "pro", "max", "mini", "plus", "ultra", "lite", "air", "edge", "one", "go", "se"]);
 /** Deterministic matcher used directly and as the no-LLM fallback. */
 export function matchProduct(query: string): Product | null {
   const q = norm(query);
-  let best: { p: Product; score: number } | null = null;
+  const qWords = q.split(" ");
+  let best: { p: Product; score: number; brandMatch: boolean } | null = null;
   for (const p of CATALOG) {
     let score = 0;
+    let brandMatch = false;
     for (const a of [p.id.replace(/-/g, " "), p.name, ...p.aliases]) {
       const n = norm(a);
-      if (q.includes(n)) score = Math.max(score, n.length + 10);
-      else { const hits = n.split(" ").filter((w) => w.length > 2 && q.split(" ").includes(w)).length; score = Math.max(score, hits * 3); }
+      if (q.includes(n)) {
+        score = Math.max(score, n.length + 10);
+        brandMatch = true;
+      } else {
+        const nWords = n.split(" ").filter((w) => w.length > 2);
+        const hits = nWords.filter((w) => qWords.includes(w) && !GENERIC_MODEL_WORDS.has(w)).length;
+        score = Math.max(score, hits * 3);
+      }
     }
-    if (score > 0 && (!best || score > best.score)) best = { p, score };
+    const pBrand = norm(p.brand);
+    if (qWords.some((w) => pBrand.includes(w) || w.includes(pBrand))) brandMatch = true;
+    if (score > 0 && (!best || score > best.score)) best = { p, score, brandMatch };
   }
-  return best?.p ?? null;
+  if (!best) return null;
+  if (best.score < 6 && !best.brandMatch) return null;
+  return best.p;
 }
 export const getProduct = (id: string) => CATALOG.find((p) => p.id === id) ?? null;
