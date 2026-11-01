@@ -4,6 +4,7 @@ import { getProduct } from "@/lib/catalog";
 import { analyze } from "@/lib/service";
 import { toSeries } from "@/lib/history";
 import { round2 } from "@/lib/rand";
+import { getGift } from "@/lib/share";
 export const dynamic = "force-dynamic";
 
 /** Enriched watchlist: current deal, % to target, sparkline, prediction. */
@@ -26,7 +27,7 @@ export async function GET() {
         retailer: best.retailer, effectivePrice: best.effectivePrice, totalCost: best.totalCost,
         tax: best.tax, score: best.score, coupon: best.coupon?.code, inStock: best.inStock, condition: best.condition,
       } : null,
-      insight: a.insight, pctToTarget, spark,
+      insight: a.insight, pctToTarget, spark, gift: await getGift(p.id),
     });
   }
   return NextResponse.json({ items, count: items.length });

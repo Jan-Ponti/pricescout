@@ -112,3 +112,28 @@ On any watch, tick **Auto-buy at** and set a max price (defaults to the watch ta
 - **Fully automatic (sandbox only):** the agent pays immediately with PayPal's public sandbox test card, with no click. Real PayPal needs a buyer-approved vaulted payment method (Vault v3 setup token approved by the buyer), which the Agent Toolkit doesn't expose, so in `PAYPAL_ENV=live` this mode always falls back to approval.
 
 Auto-buy is one-shot: it disarms after firing so the agent never buys the same item twice. Every agent purchase (auto-buy and chat checkout) is logged in the `purchases` table and shown under **Agent purchases**, and pending approvals count toward the monthly cap.
+
+## 🆕 More features (PRs #3–#10)
+
+Each feature has a rule-based path, so the app works fully **without an OpenAI key** and **without PayPal credentials** (checkout is then simulated and labeled).
+
+| # | Feature | Where |
+|---|---|---|
+| 3 | **Postgres backend.** Set `DATABASE_URL` to use Postgres (schema auto-migrates). Without it, the app uses SQLite (sql.js), which resets on Render's free plan. | `lib/db.ts`, `lib/schema.ts` |
+| 4 | **Auto-buy at target price** with a monthly cap and a purchase log (see above) | `lib/autobuy.ts`, `lib/purchases.ts` |
+| 5 | **PayPal Pay Later messaging** (JS SDK) with computed Pay in 4 / monthly estimates | `app/PayLater.tsx`, `lib/paylater.ts` |
+| 6 | **Price protection.** Purchases are re-checked on each price check. If the price drops ≥ $1 within the protection window (default 14 days, set in Prefs), you get one alert per new low plus a **drafted refund / price-adjustment request** to copy. Drafts are never sent anywhere. | `lib/protection.ts`, `app/Protection.tsx` |
+| 7 | **Paste a link or photo.** Paste a retailer URL into chat, or upload a product photo (📷). URLs are parsed from the slug (Amazon, Best Buy, Walmart, Target, …). Photos go to a vision model when a key is set; otherwise the image's filename is matched. Both offer **Start tracking**. Matching is limited to the demo catalog. | `lib/identify.ts`, `/api/identify` |
+| 8 | **AI review summaries.** Pros, cons, common complaints and a one-line verdict appear next to the deal score. The LLM is used when a key is set; otherwise it's a keyword-based summary. Results are cached. Reviews are **mock** data. | `lib/reviews.ts`, `lib/providers/mockReviews.ts` |
+| 9 | **Monthly spending limit.** Set a budget in Prefs or chat ("monthly budget $500"). Verdicts flip BUY → WAIT when a deal doesn't fit what's left, the advice mentions the budget, chat answers "how much have I spent?", and auto-buy never goes over it. | `lib/budget.ts`, `app/Purchases.tsx` |
+| 10 | **Gift / wishlist sharing.** **Share wishlist** on the Watchlist creates a read-only link at `/w/<token>` (rotate or revoke it at any time). Friends see names and current best prices only, with no targets, prefs or purchases. They can pay with PayPal sandbox (approval redirect, captured on return) or the sandbox test card. The item then shows as **gifted** on both lists. Only orders the server created for that link can mark an item gifted. | `lib/share.ts`, `app/w/[token]/page.tsx`, `/api/w/[token]/*` |
+
+### Scheduled checks
+`POST /api/cron/check-prices` (Bearer `CRON_SECRET`) re-prices watches, fires alerts, runs auto-buy and checks price protection. On Render's free plan, call it from an external scheduler such as cron-job.org. A GitHub Actions `schedule` workflow for this is **pending**: it needs a token with `workflow` scope plus `APP_URL` / `CRON_SECRET` repository secrets, so it isn't in the repo yet.
+
+### Known limitations
+- Prices, coupons and reviews are **mock** data.
+- Link and photo matching only covers the demo catalog.
+- The vision path hasn't been tested end-to-end without a key, where only the filename fallback runs.
+- SQLite data resets on Render's free plan. Use `DATABASE_URL` for persistence.
+- This is a single-user app with one share link per instance.
