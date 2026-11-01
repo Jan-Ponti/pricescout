@@ -62,3 +62,21 @@ export async function advise(p: Product, deals: Deal[], ins: Insight, prefs?: Sh
   } catch (e) { console.warn("LLM advise failed:", (e as Error).message); return { text: fallback, via: "rules" }; }
 }
 export const wantsToBuy = (m: string) => /\b(buy|checkout|check out|purchase|order it|get it)\b/i.test(m);
+
+/** Generic helper: ask the LLM for text, returning the rule-based fallback when there is no key or the call fails. */
+export async function aiText(system: string, user: string, fallback: string, temperature = 0.3): Promise<{ text: string; via: "llm" | "rules" }> {
+  if (!aiEnabled()) return { text: fallback, via: "rules" };
+  try {
+    const r = await client().chat.completions.create({ model: model(), temperature, messages: [{ role: "system", content: system }, { role: "user", content: user }] });
+    return { text: r.choices[0].message.content?.trim() || fallback, via: "llm" };
+  } catch (e) { console.warn("LLM text failed:", (e as Error).message); return { text: fallback, via: "rules" }; }
+}
+/** Generic JSON helper with fallback. */
+export async function aiJson<T>(system: string, user: string | OpenAI.Chat.Completions.ChatCompletionContentPart[], fallback: T): Promise<{ data: T; via: "llm" | "rules" }> {
+  if (!aiEnabled()) return { data: fallback, via: "rules" };
+  try {
+    const r = await client().chat.completions.create({ model: model(), temperature: 0, response_format: { type: "json_object" },
+      messages: [{ role: "system", content: system }, { role: "user", content: user as any }] });
+    return { data: JSON.parse(r.choices[0].message.content || "{}") as T, via: "llm" };
+  } catch (e) { console.warn("LLM json failed:", (e as Error).message); return { data: fallback, via: "rules" }; }
+}

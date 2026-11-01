@@ -16,6 +16,8 @@ export interface CouponProvider { name: string; getCoupons(p: Product, retailers
 export interface ShopperPrefs {
   zip?: string; budget?: number; needBy?: string; allowOpenBox?: boolean; allowRefurbished?: boolean;
   memberships?: Array<"prime" | "plus" | "walmart+">;
+  /** Price-protection window in days after a purchase (default 14). */
+  protectionDays?: number;
 }
 export interface WatchOpts {
   alertAtl?: boolean; nearLowPct?: number | null; alertStock?: boolean; alertCoupon?: boolean;

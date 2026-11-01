@@ -8,6 +8,7 @@ export async function POST(req: Request) {
     zip: body.zip, budget: body.budget === "" || body.budget == null ? undefined : Number(body.budget),
     needBy: body.needBy === "" ? undefined : body.needBy,
     allowOpenBox: !!body.allowOpenBox, allowRefurbished: !!body.allowRefurbished,
+    protectionDays: body.protectionDays === "" || body.protectionDays == null ? undefined : Number(body.protectionDays),
     memberships: Array.isArray(body.memberships) ? body.memberships : undefined,
   });
   return NextResponse.json(prefs);
