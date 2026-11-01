@@ -2,10 +2,11 @@
 import { useEffect, useState } from "react";
 type P = { id: string; order_id: string | null; product_name: string; retailer: string; amount: number; status: string; mode: string; source: string; approve_url: string | null; note: string | null; created: string };
 export default function Purchases({ refreshKey }: { refreshKey?: number }) {
-  const [d, setD] = useState<{ purchases: P[]; spentThisMonth: number } | null>(null);
+  const [d, setD] = useState<{ purchases: P[]; spentThisMonth: number; budget?: { monthlyBudget: number | null; remaining: number | null; pct: number | null } } | null>(null);
   useEffect(() => { fetch("/api/purchases").then((r) => r.json()).then(setD); }, [refreshKey]);
   return (<div className="card" id="purchases" data-testid="purchases">
-    <h3>Agent purchases {d ? <small className="note">· ${d.spentThisMonth.toFixed(2)} committed this month</small> : null}</h3>
+    <h3>Agent purchases {d ? <small className="note">· ${d.spentThisMonth.toFixed(2)} committed this month{d.budget?.monthlyBudget ? ` of $${d.budget.monthlyBudget.toFixed(2)} budget` : ""}</small> : null}</h3>
+    {d?.budget?.monthlyBudget ? <div data-testid="budget-bar" title={`$${d.budget.remaining?.toFixed(2)} left`}><div style={{ background: "#eee", borderRadius: 6, height: 8 }}><div style={{ width: `${Math.min(100, d.budget.pct ?? 0)}%`, background: (d.budget.pct ?? 0) >= 100 ? "#d33" : (d.budget.pct ?? 0) >= 80 ? "#e9a400" : "#2a9d5c", height: 8, borderRadius: 6 }} /></div><div className="note" style={{ margin: "2px 0 6px" }}>${d.budget.remaining?.toFixed(2)} left this month · auto-buy will never go over</div></div> : null}
     {!d?.purchases.length ? <div className="note">No purchases yet. Arm 🤖 auto-buy on a watch or check out from chat.</div> :
       <table><thead><tr><th>When</th><th>Item</th><th>Amount</th><th>How</th><th>Status</th></tr></thead><tbody>
         {d.purchases.map((p) => <tr key={p.id}><td>{new Date(p.created).toLocaleDateString()}</td><td>{p.product_name}<div className="note" style={{ margin: 0 }}>{p.retailer}{p.order_id ? ` · ${p.order_id}` : ""}</div></td>

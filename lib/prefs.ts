@@ -35,6 +35,7 @@ export async function setPrefs(patch: Partial<ShopperPrefs>): Promise<ShopperPre
   if (next.zip != null) next.zip = String(next.zip).replace(/\D/g, "").slice(0, 5);
   if (next.budget != null && !(Number(next.budget) > 0)) next.budget = undefined;
   if (next.needBy != null && next.needBy !== "" && Number.isNaN(Date.parse(next.needBy))) next.needBy = undefined;
+  if (next.monthlyBudget != null && !(Number(next.monthlyBudget) > 0)) next.monthlyBudget = undefined;
   if (next.protectionDays != null && !(Number(next.protectionDays) > 0 && Number(next.protectionDays) <= 365)) next.protectionDays = undefined;
   await run("INSERT OR REPLACE INTO kv VALUES ('shopper_prefs', ?)", [JSON.stringify(next)]);
   return next;
@@ -43,7 +44,10 @@ export async function setPrefs(patch: Partial<ShopperPrefs>): Promise<ShopperPre
 /** Pull budget / ZIP / deadline / condition prefs out of free-text chat. */
 export function parseConstraints(message: string): Partial<ShopperPrefs> {
   const out: Partial<ShopperPrefs> = {};
-  const under = message.match(/\b(?:under|below|max(?:imum)?|budget(?:\s*(?:of|is)?)?|no more than)\s*\$?\s*(\d+(?:\.\d+)?)\b/i)
+  const monthly = message.match(/\bmonthly\s+(?:budget|limit|spending limit)\s*(?:of|is|to|=)?\s*\$?\s*(\d+(?:\.\d+)?)/i)
+    || message.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:a|per|\/)\s*month\b/i);
+  if (monthly) out.monthlyBudget = Number(monthly[1]);
+  const under = monthly ? null : message.match(/\b(?:under|below|max(?:imum)?|budget(?:\s*(?:of|is)?)?|no more than)\s*\$?\s*(\d+(?:\.\d+)?)\b/i)
     || message.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:or less|max|ceiling)\b/i);
   if (under) out.budget = Number(under[1]);
   const zip = message.match(/\b(?:zip(?:code)?|postal)\s*[#:.]?\s*(\d{5})\b/i);

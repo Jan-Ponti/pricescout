@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 
 type Prefs = {
-  zip?: string; budget?: number; needBy?: string; allowOpenBox?: boolean; allowRefurbished?: boolean; protectionDays?: number;
+  zip?: string; budget?: number; needBy?: string; allowOpenBox?: boolean; allowRefurbished?: boolean; protectionDays?: number; monthlyBudget?: number;
   memberships?: string[];
 };
 
@@ -30,13 +30,14 @@ export default function PrefsPanel({ onChange }: { onChange?: (p: Prefs) => void
       </div>
       {!open ? (
         <div className="note" style={{ marginTop: 8 }}>
-          ZIP {p.zip || "—"} · budget {p.budget != null ? `$${p.budget}` : "—"} · need by {p.needBy || "—"} · {(p.memberships ?? []).join(", ") || "no memberships"}
+          ZIP {p.zip || "—"} · budget {p.budget != null ? `$${p.budget}` : "—"} · monthly {p.monthlyBudget != null ? `$${p.monthlyBudget}` : "—"} · need by {p.needBy || "—"} · {(p.memberships ?? []).join(", ") || "no memberships"}
           {(p.allowOpenBox || p.allowRefurbished) ? ` · ${[p.allowOpenBox && "open-box", p.allowRefurbished && "refurb"].filter(Boolean).join("/")}` : ""}
         </div>
       ) : (
         <div className="prefsform">
           <label>ZIP<input value={p.zip ?? ""} onChange={(e) => setP({ ...p, zip: e.target.value })} placeholder="48201" /></label>
           <label>Budget $<input type="number" value={p.budget ?? ""} onChange={(e) => setP({ ...p, budget: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="200" /></label>
+          <label>Monthly budget $<input type="number" value={p.monthlyBudget ?? ""} onChange={(e) => setP({ ...p, monthlyBudget: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="500" /></label>
           <label>Price protection (days)<input type="number" value={p.protectionDays ?? ""} onChange={(e) => setP({ ...p, protectionDays: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="14" /></label>
           <label>Need by<input type="date" value={p.needBy ?? ""} onChange={(e) => setP({ ...p, needBy: e.target.value })} /></label>
           <div className="mems">
