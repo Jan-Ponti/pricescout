@@ -129,7 +129,7 @@ Each feature has a rule-based path, so the app works fully **without an OpenAI k
 | 10 | **Gift / wishlist sharing.** **Share wishlist** on the Watchlist creates a read-only link at `/w/<token>` (rotate or revoke it at any time). Friends see names and current best prices only, with no targets, prefs or purchases. They can pay with PayPal sandbox (approval redirect, captured on return) or the sandbox test card. The item then shows as **gifted** on both lists. Only orders the server created for that link can mark an item gifted. | `lib/share.ts`, `app/w/[token]/page.tsx`, `/api/w/[token]/*` |
 
 ### Scheduled checks
-`POST /api/cron/check-prices` (Bearer `CRON_SECRET`) re-prices watches, fires alerts, runs auto-buy and checks price protection. On Render's free plan, call it from an external scheduler such as cron-job.org. A GitHub Actions `schedule` workflow for this is **pending**: it needs a token with `workflow` scope plus `APP_URL` / `CRON_SECRET` repository secrets, so it isn't in the repo yet.
+`POST /api/cron/check-prices` (Bearer `CRON_SECRET`) re-prices watches, fires alerts, runs auto-buy and checks price protection. Render's free plan has no cron jobs, so `.github/workflows/check-prices.yml` calls it every hour (and on demand via **Actions → Scheduled price check → Run workflow**), retrying while a sleeping free instance wakes up. It uses two repo secrets: `APP_URL` and `CRON_SECRET` (same value as the web service's env var). GitHub may delay scheduled runs by a few minutes and pauses schedules in repos with no activity for 60 days.
 
 ### Known limitations
 - Prices, coupons and reviews are **mock** data.
