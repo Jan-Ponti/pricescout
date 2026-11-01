@@ -6,6 +6,7 @@ import Watchlist from "./Watchlist";
 import PrefsPanel from "./Prefs";
 import Purchases from "./Purchases";
 import PayLater from "./PayLater";
+import Protection from "./Protection";
 
 type Deal = {
   retailer: string; price: number; shipping: number; inStock: boolean; source: string; discount: number;
@@ -103,6 +104,7 @@ export default function Home() {
       <section>
         <div className="grid"><PrefsPanel onChange={() => { onPrefs(); }} /><Watchlist refreshKey={watchKey} onOpen={openProduct} /></div>
         <div className="grid"><Purchases refreshKey={watchKey + chartKey} /></div>
+        <div className="grid"><Protection refreshKey={watchKey + chartKey} /></div>
         {!a ? <div className="card empty"><h2>What are we buying today?</h2><p>Name a product in the chat. I&apos;ll rank by total cost, score the deal, apply coupons, and chart price history.</p></div> : <>
         <div className="card hero"><div className="emoji">{a.product.image}</div>
           <div><h2>{a.product.name}</h2><div style={{ color: "var(--muted)", fontSize: 14 }}>{a.product.brand} · {a.product.category} · MSRP {$(a.product.msrp)}</div></div>

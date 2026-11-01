@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 
 type Prefs = {
-  zip?: string; budget?: number; needBy?: string; allowOpenBox?: boolean; allowRefurbished?: boolean;
+  zip?: string; budget?: number; needBy?: string; allowOpenBox?: boolean; allowRefurbished?: boolean; protectionDays?: number;
   memberships?: string[];
 };
 
@@ -37,6 +37,7 @@ export default function PrefsPanel({ onChange }: { onChange?: (p: Prefs) => void
         <div className="prefsform">
           <label>ZIP<input value={p.zip ?? ""} onChange={(e) => setP({ ...p, zip: e.target.value })} placeholder="48201" /></label>
           <label>Budget $<input type="number" value={p.budget ?? ""} onChange={(e) => setP({ ...p, budget: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="200" /></label>
+          <label>Price protection (days)<input type="number" value={p.protectionDays ?? ""} onChange={(e) => setP({ ...p, protectionDays: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="14" /></label>
           <label>Need by<input type="date" value={p.needBy ?? ""} onChange={(e) => setP({ ...p, needBy: e.target.value })} /></label>
           <div className="mems">
             {MEMBERS.map((m) => <button key={m} type="button" className={`ghost ${p.memberships?.includes(m) ? "active" : ""}`} onClick={() => toggleMem(m)}>{m}</button>)}

@@ -35,6 +35,7 @@ export async function setPrefs(patch: Partial<ShopperPrefs>): Promise<ShopperPre
   if (next.zip != null) next.zip = String(next.zip).replace(/\D/g, "").slice(0, 5);
   if (next.budget != null && !(Number(next.budget) > 0)) next.budget = undefined;
   if (next.needBy != null && next.needBy !== "" && Number.isNaN(Date.parse(next.needBy))) next.needBy = undefined;
+  if (next.protectionDays != null && !(Number(next.protectionDays) > 0 && Number(next.protectionDays) <= 365)) next.protectionDays = undefined;
   await run("INSERT OR REPLACE INTO kv VALUES ('shopper_prefs', ?)", [JSON.stringify(next)]);
   return next;
 }
