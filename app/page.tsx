@@ -21,7 +21,7 @@ type Analysis = {
   insight: { lowest: { date: string; price: number; retailer: string } | null; avg90: number; current: number; prediction?: Prediction };
   sources: { prices: string[]; coupons: string[] }; prefs?: { zip?: string; budget?: number };
 };
-type Msg = { role: "user" | "bot"; text: string };
+type Msg = { role: "user" | "bot"; text: string; track?: { id: string; name: string } };
 
 const md = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
 const $ = (n: number) => `$${n.toFixed(2)}`;
@@ -30,6 +30,7 @@ const SUGGEST = [
   "I want AirPods Pro, ZIP 48201, I have Prime",
   "Track the Nintendo Switch OLED — open-box OK",
   "Cheapest Dyson V15? Need by Friday",
+  "https://www.bestbuy.com/site/nintendo-switch-oled-model-white/6470923.p",
 ];
 
 export default function Home() {
@@ -60,10 +61,24 @@ export default function Home() {
     setMsgs((m) => [...m, { role: "user", text }]); setInput(""); setBusy(true);
     try {
       const r = await (await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, currentProductId: a?.product.id }) })).json();
-      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? r.error }]);
+      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? r.error, track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined }]);
       if (r.deals) setA(r);
       if (r.intent === "checkout" && (r.deals?.[0] || a?.deals[0])) { setResult(null); setCheckout(r.deals?.[0] ?? a!.deals[0]); }
     } finally { setBusy(false); }
+  }
+  async function upload(f: File) {
+    if (busy) return; if (f.size > 4 * 1024 * 1024) { setMsgs((m) => [...m, { role: "bot", text: "That image is over 4 MB — try a smaller one." }]); return; }
+    setMsgs((m) => [...m, { role: "user", text: `📷 ${f.name}` }]); setBusy(true);
+    try {
+      const image = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(f); });
+      const r = await (await fetch("/api/identify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image, filename: f.name, caption: input }) })).json();
+      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? r.error, track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined }]);
+      if (r.product) { const an = await (await fetch(`/api/analyze?productId=${r.product.id}`)).json(); if (an.deals) setA(an); }
+    } finally { setBusy(false); }
+  }
+  async function track(t: { id: string; name: string }) {
+    const r = await (await fetch("/api/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId: t.id }) })).json();
+    setMsgs((m) => [...m, { role: "bot", text: r.error ? `❌ ${r.error}` : `👀 Tracking **${t.name}** — I'll alert you when the price drops.` }]); setWatchKey((k) => k + 1);
   }
   async function openProduct(productId: string) {
     const r = await (await fetch(`/api/analyze?productId=${encodeURIComponent(productId)}`)).json();
@@ -95,11 +110,11 @@ export default function Home() {
         <span className={`pill ${status.paypal ? "on" : ""}`}>{status.paypal ? "● PayPal sandbox" : "○ PayPal simulated"}</span></>} <NotificationCenter notes={notes} refresh={refresh} /></div></header>
     <main>
       <section className="card chat">
-        <div className="msgs">{msgs.map((m, i) => <div key={i} className={`msg ${m.role}`} dangerouslySetInnerHTML={{ __html: md(m.text) }} />)}
+        <div className="msgs">{msgs.map((m, i) => <div key={i} className={`msg ${m.role}`}><span dangerouslySetInnerHTML={{ __html: md(m.text) }} />{m.track && <div><button className="ghost" data-testid="start-tracking" onClick={() => track(m.track!)}>👀 Start tracking</button></div>}</div>)}
           {busy && <div className="msg bot">Thinking…</div>}<div ref={end} /></div>
         <div className="chips">{SUGGEST.map((s) => <button key={s} className="ghost" onClick={() => send(s)}>{s}</button>)}</div>
         <form className="input" onSubmit={(e) => { e.preventDefault(); send(input); }}>
-          <input aria-label="chat" value={input} onChange={(e) => setInput(e.target.value)} placeholder="e.g. best deal on a Kindle under $120, ZIP 48201" /><button disabled={busy}>Send</button></form>
+          <input aria-label="chat" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Name a product, paste a product link, or 📷 a photo" /><label className="ghost" title="Upload a product photo" style={{ cursor: "pointer", padding: "0 8px", alignSelf: "center" }}>📷<input type="file" accept="image/*" hidden aria-label="upload photo" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} /></label><button disabled={busy}>Send</button></form>
       </section>
       <section>
         <div className="grid"><PrefsPanel onChange={() => { onPrefs(); }} /><Watchlist refreshKey={watchKey} onOpen={openProduct} /></div>

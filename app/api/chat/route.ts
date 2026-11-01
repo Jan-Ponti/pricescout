@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { identifyProduct, advise, aiEnabled, wantsToBuy } from "@/lib/ai";
 import { analyze } from "@/lib/service";
 import { getProduct, CATALOG } from "@/lib/catalog";
+import { findUrl, identifyFromUrl } from "@/lib/identify";
 import { parseConstraints, setPrefs, getPrefs } from "@/lib/prefs";
 export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
@@ -11,6 +12,14 @@ export async function POST(req: Request) {
   if (current && wantsToBuy(message) && message.split(" ").length < 6)
     return NextResponse.json({ reply: "Ready when you are — review the order summary and press **Approve & pay with PayPal**. Nothing is charged until you approve.", product: current, intent: "checkout", ai: aiEnabled() });
 
+  const url = findUrl(message);
+  if (url) {
+    const r = await identifyFromUrl(url);
+    if (!r.product) return NextResponse.json({ reply: `I read that link${r.parsed ? ` (${r.parsed.domain}: "${r.parsed.words || "no product words"}")` : ""} but couldn't match it to a product I can track. In this demo I can track: ${CATALOG.map((p) => p.name).join(", ")}.`, product: null, ai: aiEnabled(), via: r.via });
+    const a = await analyze(r.product, await getPrefs());
+    const from = r.parsed?.retailer ? ` from ${r.parsed.retailer}` : "";
+    return NextResponse.json({ reply: `That link${from} is **${r.product.name}**. Best total right now: **${a.deals[0].retailer}** at $${a.deals[0].totalCost.toFixed(2)}. Want me to start tracking it?`, product: r.product, ...a, ai: aiEnabled(), via: { identify: r.via }, intent: "analyze", offerTrack: true });
+  }
   const constraints = parseConstraints(message);
   if (Object.keys(constraints).length) await setPrefs(constraints);
   const prefs = await getPrefs();
