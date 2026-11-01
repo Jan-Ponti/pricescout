@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { query, run, parseWatchOpts, serializeWatchOpts } from "@/lib/db";
 import { getProduct } from "@/lib/catalog";
 import { analyze } from "@/lib/service";
-import type { WatchOpts } from "@/lib/types";
+import type { WatchOpts, AutoBuyOpts } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 function rowOut(w: Record<string, any>) {
   return { ...w, opts: parseWatchOpts(w.opts) };
 }
 
+function parseAutoBuy(raw: any, target: number | null): AutoBuyOpts {
+  const num = (v: any) => (v === "" || v == null || !(Number(v) > 0) ? null : Number(v));
+  return { enabled: !!raw.enabled, maxPrice: num(raw.maxPrice) ?? target, monthlyCap: num(raw.monthlyCap), mode: raw.mode === "auto" ? "auto" : "approval", firedAt: null, lastPurchaseId: null };
+}
 export async function GET() {
   return NextResponse.json((await query("SELECT * FROM watches ORDER BY created DESC")).map(rowOut));
 }
@@ -29,6 +33,7 @@ export async function POST(req: Request) {
     nearLowPct: body.nearLowPct === "" || body.nearLowPct == null ? (body.nearLowPct === "" ? null : (prev.nearLowPct ?? null)) : Number(body.nearLowPct),
     alertStock: body.alertStock != null ? !!body.alertStock : !!prev.alertStock,
     alertCoupon: body.alertCoupon != null ? !!body.alertCoupon : !!prev.alertCoupon,
+    autoBuy: body.autoBuy != null ? parseAutoBuy(body.autoBuy, t) : prev.autoBuy,
     lastInStock: best.inStock,
     lastHadCoupon: !!best.coupon,
   };

@@ -20,7 +20,10 @@ export interface ShopperPrefs {
 export interface WatchOpts {
   alertAtl?: boolean; nearLowPct?: number | null; alertStock?: boolean; alertCoupon?: boolean;
   lastInStock?: boolean | null; lastHadCoupon?: boolean | null;
+  autoBuy?: AutoBuyOpts;
 }
+/** Opt-in agent purchase when a watched item reaches maxPrice. "approval" (default) sends a PayPal approve link; "auto" captures without a click (sandbox only). */
+export interface AutoBuyOpts { enabled: boolean; maxPrice: number | null; monthlyCap: number | null; mode: "approval" | "auto"; firedAt?: string | null; lastPurchaseId?: string | null }
 export interface Insight {
   lowest: { date: string; price: number; retailer: string } | null;
   avg90: number; current: number;

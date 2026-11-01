@@ -103,3 +103,12 @@ lib/ai.ts               OpenAI calls + deterministic fallback
 
 ## License
 MIT. See [LICENSE](LICENSE).
+
+## 🤖 Auto-buy at your target price
+
+On any watch, tick **Auto-buy at** and set a max price (defaults to the watch target) plus an optional **monthly cap**. When a scheduled or simulated price check finds the best deal at or below the max price, in stock, and within the cap:
+
+- **Ask me to approve (default):** the agent creates a PayPal sandbox order and sends an in-app / push / email / SMS alert with the PayPal approve link. Approving captures the payment.
+- **Fully automatic (sandbox only):** the agent pays immediately with PayPal's public sandbox test card, with no click. Real PayPal needs a buyer-approved vaulted payment method (Vault v3 setup token approved by the buyer), which the Agent Toolkit doesn't expose, so in `PAYPAL_ENV=live` this mode always falls back to approval.
+
+Auto-buy is one-shot: it disarms after firing so the agent never buys the same item twice. Every agent purchase (auto-buy and chat checkout) is logged in the `purchases` table and shown under **Agent purchases**, and pending approvals count toward the monthly cap.
