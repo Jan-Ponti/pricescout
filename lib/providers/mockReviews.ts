@@ -1,0 +1,15 @@
+import type { Product } from "../types";
+/** MOCK review data — hand-written sample reviews per catalog product, not scraped from any retailer. */
+export interface Review { rating: number; text: string; source: "mock" }
+const R = (rating: number, text: string): Review => ({ rating, text, source: "mock" });
+const BY_ID: Record<string, Review[]> = {
+  "sony-wh1000xm5": [R(5, "Noise canceling is incredible on flights. Battery lasts all week."), R(4, "Great sound and comfortable, but the case is bulky."), R(3, "Sound is great but they don't fold, case is bulky."), R(2, "Touch controls are finicky and misfire when adjusting."), R(5, "Comfortable for hours, call quality is clear."), R(4, "Battery life is excellent; touch controls take getting used to.")],
+  "airpods-pro-2": [R(5, "Noise canceling and transparency mode are excellent."), R(4, "Great sound, seamless with iPhone. Battery could be longer."), R(3, "Fit is uncomfortable for my ears after an hour."), R(5, "USB-C case is convenient, sound quality is great."), R(2, "Limited features on Android."), R(4, "Battery life is fine; the fit tips help.")],
+  "nintendo-switch-oled": [R(5, "The OLED screen is gorgeous and colors pop."), R(4, "Great for travel, battery is decent."), R(3, "Joy-Con drift started after a few months."), R(4, "Screen is great but storage fills up fast."), R(2, "Joy-Con drift again, expensive to fix."), R(5, "Kickstand is much better than the original.")],
+  "kindle-paperwhite": [R(5, "Screen is easy on the eyes, battery lasts weeks."), R(5, "Waterproof and light, perfect for reading in the bath."), R(4, "Great screen but lockscreen ads unless you pay."), R(3, "Page turns feel slow sometimes."), R(4, "Warm light is great at night; battery is excellent.")],
+  "dyson-v15": [R(5, "Suction is powerful and the laser shows dust I never saw."), R(4, "Great suction, but the bin is small and fills fast."), R(3, "Battery dies quickly on max mode."), R(2, "Expensive and the bin is small."), R(5, "Lightweight and powerful suction on carpet.")],
+  "instant-pot-duo": [R(5, "Easy to use, cooks rice and beans fast."), R(4, "Great value, but the sealing ring smells."), R(3, "Learning curve, the manual is confusing."), R(5, "Easy to clean and saves so much time."), R(4, "Great value for the price.")],
+  "lego-millennium-falcon": [R(5, "Fun build with great detail, kids loved it."), R(4, "Great detail but pieces were missing from one bag."), R(4, "Fun build, a bit fragile once finished."), R(5, "Great gift and great detail."), R(3, "Expensive for the piece count.")],
+  "logitech-mx-master-3s": [R(5, "Comfortable for long days and the scroll wheel is amazing."), R(5, "Quiet clicks, multi-device switching works great."), R(4, "Comfortable, but software is required for some features."), R(3, "Too big for small hands."), R(4, "Battery lasts for weeks, comfortable grip.")],
+};
+export function mockReviews(p: Product): Review[] { return BY_ID[p.id] ?? [R(4, "Works as described."), R(3, "Okay for the price.")]; }

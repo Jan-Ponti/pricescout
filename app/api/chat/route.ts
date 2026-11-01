@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { identifyProduct, advise, aiEnabled, wantsToBuy } from "@/lib/ai";
 import { analyze } from "@/lib/service";
 import { getProduct, CATALOG } from "@/lib/catalog";
+import { findUrl, identifyFromUrl } from "@/lib/identify";
+import { spentThisMonth } from "@/lib/purchases";
+import { budgetStatus } from "@/lib/budget";
 import { parseConstraints, setPrefs, getPrefs } from "@/lib/prefs";
 export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
@@ -11,10 +14,22 @@ export async function POST(req: Request) {
   if (current && wantsToBuy(message) && message.split(" ").length < 6)
     return NextResponse.json({ reply: "Ready when you are — review the order summary and press **Approve & pay with PayPal**. Nothing is charged until you approve.", product: current, intent: "checkout", ai: aiEnabled() });
 
+  const url = findUrl(message);
+  if (url) {
+    const r = await identifyFromUrl(url);
+    if (!r.product) return NextResponse.json({ reply: `I read that link${r.parsed ? ` (${r.parsed.domain}: "${r.parsed.words || "no product words"}")` : ""} but couldn't match it to a product I can track. In this demo I can track: ${CATALOG.map((p) => p.name).join(", ")}.`, product: null, ai: aiEnabled(), via: r.via });
+    const a = await analyze(r.product, await getPrefs());
+    const from = r.parsed?.retailer ? ` from ${r.parsed.retailer}` : "";
+    return NextResponse.json({ reply: `That link${from} is **${r.product.name}**. Best total right now: **${a.deals[0].retailer}** at $${a.deals[0].totalCost.toFixed(2)}. Want me to start tracking it?`, product: r.product, ...a, ai: aiEnabled(), via: { identify: r.via }, intent: "analyze", offerTrack: true });
+  }
   const constraints = parseConstraints(message);
   if (Object.keys(constraints).length) await setPrefs(constraints);
   const prefs = await getPrefs();
 
+  if (/\b(how much (have i|did i) spen[dt]|spent so far|budget left|left (in|of) my budget)\b/i.test(message) || (constraints.monthlyBudget != null && Object.keys(constraints).length === 1 && message.split(" ").length < 10)) {
+    const b = budgetStatus(await spentThisMonth(), prefs.monthlyBudget);
+    return NextResponse.json({ reply: b.monthlyBudget ? `You've committed **$${b.spent.toFixed(2)}** of your **$${b.monthlyBudget.toFixed(2)}** monthly budget — **$${b.remaining!.toFixed(2)}** left. Auto-buy will never go over it.` : `You've committed **$${b.spent.toFixed(2)}** this month. Set a monthly budget (e.g. "monthly budget $500") and I'll keep purchases under it.`, product: null, prefs, ai: aiEnabled(), budget: b });
+  }
   const { product, via } = await identifyProduct(message);
   if (!product) {
     const hint = Object.keys(constraints).length
@@ -31,6 +46,7 @@ export async function POST(req: Request) {
 function summarizePrefs(c: Record<string, unknown>) {
   const bits: string[] = [];
   if (c.budget != null) bits.push(`budget $${c.budget}`);
+  if (c.monthlyBudget != null) bits.push(`monthly budget $${c.monthlyBudget}`);
   if (c.zip) bits.push(`ZIP ${c.zip}`);
   if (c.needBy) bits.push(`need by ${c.needBy}`);
   if (c.allowOpenBox) bits.push("open-box OK");

@@ -5,11 +5,13 @@ import { evaluate, buildAlert } from "./rules";
 import { dispatch } from "./channels";
 import type { WatchOpts } from "../types";
 import { decideAutoBuy, executeAutoBuy, spentThisMonth } from "../autobuy";
+import { getPrefs } from "../prefs";
 export const appUrl = (fallback?: string) => process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || fallback || "http://localhost:3000";
 /** Re-price every watched product (recording a snapshot), compare to the last checked price/target, and notify. */
 export async function checkWatches(origin?: string) {
   const watches = await query("SELECT product_id, target, last_price, opts FROM watches");
   const out = [];
+  const monthlyBudget = (await getPrefs()).monthlyBudget ?? null;
   for (const w of watches) {
     const p = getProduct(String(w.product_id)); if (!p) continue;
     const opts = parseWatchOpts(w.opts) as WatchOpts;
@@ -24,7 +26,7 @@ export async function checkWatches(origin?: string) {
     });
     const nextOpts: WatchOpts = { ...opts, lastInStock: best.inStock, lastHadCoupon: !!best.coupon };
     let autoBuy: Awaited<ReturnType<typeof executeAutoBuy>> | undefined; let autoBuyChannels: Record<string, string> | undefined;
-    const decision = decideAutoBuy(opts.autoBuy, best, opts.autoBuy?.enabled ? await spentThisMonth() : 0);
+    const decision = decideAutoBuy(opts.autoBuy, best, opts.autoBuy?.enabled ? await spentThisMonth() : 0, monthlyBudget);
     if (decision.buy && opts.autoBuy) {
       autoBuy = await executeAutoBuy(p, best, opts.autoBuy, appUrl(origin));
       // One-shot: disarm after firing so the agent never buys the same item twice.

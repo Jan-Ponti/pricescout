@@ -6,6 +6,7 @@ type Item = {
   target: number | null; pctToTarget: number | null; spark: number[];
   best: { retailer: string; effectivePrice: number; totalCost: number; score: number; coupon?: string; inStock: boolean } | null;
   insight: { prediction?: { verdict: string; confidence: number }; lowest: { price: number } | null; avg90: number };
+  gift?: { from: string } | null;
 };
 
 function Spark({ values }: { values: number[] }) {
@@ -19,6 +20,7 @@ function Spark({ values }: { values: number[] }) {
 export default function Watchlist({ onOpen, refreshKey }: { onOpen: (productId: string) => void; refreshKey?: number }) {
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const load = useCallback(() => {
     setBusy(true);
     fetch("/api/watchlist").then((r) => r.json()).then((d) => setItems(d.items ?? [])).finally(() => setBusy(false));
@@ -30,11 +32,20 @@ export default function Watchlist({ onOpen, refreshKey }: { onOpen: (productId: 
       <div className="note">No watches yet. Analyze a product and hit Watch price — everything you track shows up here.</div>
     </div>
   );
+  async function share() {
+    const j = await (await fetch("/api/share", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create" }) })).json();
+    setShareUrl(j.url); try { await navigator.clipboard.writeText(j.url); } catch {}
+  }
   return (
     <div className="card" data-testid="watchlist">
+      {shareUrl && <div className="note">Share link (copied): <a href={shareUrl} target="_blank">{shareUrl}</a>{" "}
+        <button className="ghost" onClick={async () => { await fetch("/api/share", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "revoke" }) }); setShareUrl(null); }}>Revoke</button></div>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h3 style={{ margin: 0 }}>Watchlist ({items.length})</h3>
-        <button className="ghost" onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh"}</button>
+        <span>
+          <button className="ghost" onClick={share} title="Read-only wishlist link friends can gift from">{shareUrl ? "Copy share link" : "Share wishlist"}</button>{" "}
+          <button className="ghost" onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh"}</button>
+        </span>
       </div>
       <div className="watchgrid">
         {items.map((it) => {
@@ -50,7 +61,7 @@ export default function Watchlist({ onOpen, refreshKey }: { onOpen: (productId: 
                 </small>
               </span>
               <Spark values={it.spark} />
-              <span className={`verdict ${v}`}>{v}</span>
+              {it.gift ? <span className="verdict buy" title={`Gifted by ${it.gift.from}`}>gifted</span> : <span className={`verdict ${v}`}>{v}</span>}
               <span className="scorepill">{it.best?.score ?? "–"}</span>
             </button>
           );
