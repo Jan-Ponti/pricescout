@@ -1,0 +1,36 @@
+name: Scheduled price check
+# Render's free plan has no cron jobs, so GitHub Actions pings the app's cron endpoint every hour.
+# Repo secrets: APP_URL (e.g. https://pricescout-xret.onrender.com) and CRON_SECRET (same value as the web service env var).
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly, off the top of the hour
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: check-prices
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: POST /api/cron/check-prices
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then echo "::error::Set the APP_URL and CRON_SECRET repo secrets"; exit 1; fi
+          # Free Render instances sleep when idle; retry while the instance wakes up (can take ~1 min).
+          for i in 1 2 3 4 5; do
+            code=$(curl -sS -o resp.json -w '%{http_code}' --max-time 120 -X POST \
+              -H "Authorization: Bearer $CRON_SECRET" "${APP_URL%/}/api/cron/check-prices" || echo 000)
+            echo "attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then
+              python3 -c "import json;d=json.load(open('resp.json'));r=d.get('results',[]);print(f\"checked {len(r)} watches, {sum(1 for x in r if x.get('alerted'))} alerts sent at {d.get('checkedAt')}\")"
+              exit 0
+            fi
+            if [ "$code" = "401" ]; then echo "::error::CRON_SECRET does not match the app"; exit 1; fi
+            sleep 20
+          done
+          echo "::error::Price check failed"; exit 1

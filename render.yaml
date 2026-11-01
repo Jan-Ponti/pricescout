@@ -51,6 +51,6 @@ databases:
     user: pricescout
     ipAllowList: []   # internal access only
 # No Render cron job (cron jobs are not available on the free plan).
-# Scheduled price checks: point a free external pinger (e.g. cron-job.org or a GitHub
-# Actions schedule) at POST $APP_URL/api/cron/check-prices with
+# Scheduled price checks run from GitHub Actions (.github/workflows/check-prices.yml, hourly),
+# which calls POST $APP_URL/api/cron/check-prices with
 # 'Authorization: Bearer $CRON_SECRET', or use the in-app "Simulate price drop" button.
