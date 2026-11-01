@@ -7,6 +7,7 @@ import PrefsPanel from "./Prefs";
 import Purchases from "./Purchases";
 import PayLater from "./PayLater";
 import Protection from "./Protection";
+import Reviews from "./Reviews";
 
 type Deal = {
   retailer: string; price: number; shipping: number; inStock: boolean; source: string; discount: number;
@@ -124,6 +125,7 @@ export default function Home() {
         <div className="card hero"><div className="emoji">{a.product.image}</div>
           <div><h2>{a.product.name}</h2><div style={{ color: "var(--muted)", fontSize: 14 }}>{a.product.brand} · {a.product.category} · MSRP {$(a.product.msrp)}</div></div>
           <div className="stats"><div className="stat"><small>Best total</small><b className="ok">{$(best!.totalCost)}</b><small>{best!.retailer} · score {best!.score}</small><PayLater amount={best!.effectivePrice} clientId={status?.paypalClientId} /></div>
+            <Reviews productId={a.product.id} />
             <div className="stat"><small>90-day avg</small><b>{$(a.insight.avg90)}</b></div>
             <div className="stat"><small>All-time low</small><b>{a.insight.lowest ? $(a.insight.lowest.price) : "–"}</b><small>{a.insight.lowest?.date}</small></div>
             <button className="pp" style={{ alignSelf: "center" }} onClick={() => { setResult(null); setCheckout(best!); }}>Checkout with PayPal</button></div></div>
