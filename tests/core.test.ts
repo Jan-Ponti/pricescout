@@ -30,10 +30,11 @@ describe("deals", () => {
     expect(couponDiscount({ ...o, price: 100 }, { code: "TECH20OFF", retailer: "A", description: "", type: "fixed", value: 20, minSpend: 150, verified: true, source: "mock" })).toBe(0);
     expect(couponDiscount(o, { code: "X", retailer: "A", description: "", type: "percent", value: 10, verified: false, source: "mock" })).toBe(0);
   });
-  it("sorts by effective price, in-stock first", () => {
+  it("sorts by total cost, in-stock first", () => {
     const d = bestDeals([o, { ...o, retailer: "B", price: 190 }, { ...o, retailer: "C", price: 100, inStock: false }],
-      [{ code: "SAVE10", retailer: "A", description: "", type: "percent", value: 10, verified: true, source: "mock" }]);
+      [{ code: "SAVE10", retailer: "A", description: "", type: "percent", value: 10, verified: true, source: "mock" }], { zip: undefined });
     expect(d.map((x) => x.retailer)).toEqual(["A", "B", "C"]); expect(d[0].effectivePrice).toBe(185);
+    expect(d[0].totalCost).toBeGreaterThan(0); expect(d[0].score).toBeGreaterThan(0);
   });
 });
 describe("history", () => {
