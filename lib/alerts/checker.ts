@@ -4,6 +4,7 @@ import { analyze } from "../service";
 import { evaluate, buildAlert } from "./rules";
 import { dispatch } from "./channels";
 import type { WatchOpts } from "../types";
+import { decideAutoBuy, executeAutoBuy, spentThisMonth } from "../autobuy";
 export const appUrl = (fallback?: string) => process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || fallback || "http://localhost:3000";
 /** Re-price every watched product (recording a snapshot), compare to the last checked price/target, and notify. */
 export async function checkWatches(origin?: string) {
@@ -22,7 +23,20 @@ export async function checkWatches(origin?: string) {
       hadCoupon: opts.lastHadCoupon ?? null, hasCoupon: !!best.coupon,
     });
     const nextOpts: WatchOpts = { ...opts, lastInStock: best.inStock, lastHadCoupon: !!best.coupon };
+    let autoBuy: Awaited<ReturnType<typeof executeAutoBuy>> | undefined; let autoBuyChannels: Record<string, string> | undefined;
+    const decision = decideAutoBuy(opts.autoBuy, best, opts.autoBuy?.enabled ? await spentThisMonth() : 0);
+    if (decision.buy && opts.autoBuy) {
+      autoBuy = await executeAutoBuy(p, best, opts.autoBuy, appUrl(origin));
+      // One-shot: disarm after firing so the agent never buys the same item twice.
+      nextOpts.autoBuy = { ...opts.autoBuy, enabled: false, firedAt: new Date().toISOString(), lastPurchaseId: autoBuy.id };
+      const pending = autoBuy.status === "pending_approval";
+      autoBuyChannels = await dispatch({ productId: p.id, productName: p.name, price: best.effectivePrice, drop: 0, retailer: best.retailer,
+        title: pending ? `Approve auto-buy: ${p.name}` : autoBuy.status === "completed" ? `Auto-bought: ${p.name}` : `Auto-buy failed: ${p.name}`,
+        body: `${best.retailer}: $${best.effectivePrice.toFixed(2)} (${decision.reason}). ${pending ? "Your PayPal order is ready — tap to approve." : autoBuy.status === "completed" ? `Paid with PayPal sandbox, order ${autoBuy.order_id}.` : autoBuy.note ?? ""}`,
+        url: pending && autoBuy.approve_url ? autoBuy.approve_url : `${appUrl(origin).replace(/\/$/, "")}/#purchases` });
+    }
     await run("UPDATE watches SET last_price = ?, opts = ? WHERE product_id = ?", [best.effectivePrice, serializeWatchOpts(nextOpts), p.id]);
+    if (autoBuy) { out.push({ productId: p.id, price: best.effectivePrice, alerted: true, autoBuy, channels: autoBuyChannels }); continue; }
     if (!reasons.length) { out.push({ productId: p.id, price: best.effectivePrice, alerted: false }); continue; }
     const alert = buildAlert(p.id, p.name, best, prev, reasons, appUrl(origin));
     out.push({ productId: p.id, price: best.effectivePrice, alerted: true, alert, channels: await dispatch(alert) });

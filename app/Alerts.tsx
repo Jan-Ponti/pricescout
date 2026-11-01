@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 type Note = { id: number; title: string; body: string; url: string; created: string; read: number };
-type WatchOpts = { alertAtl?: boolean; nearLowPct?: number | null; alertStock?: boolean; alertCoupon?: boolean };
+type AutoBuy = { enabled: boolean; maxPrice: number | null; monthlyCap: number | null; mode: "approval" | "auto"; firedAt?: string | null };
+type WatchOpts = { alertAtl?: boolean; nearLowPct?: number | null; alertStock?: boolean; alertCoupon?: boolean; autoBuy?: AutoBuy };
 function b64ToU8(s: string) { const p = "=".repeat((4 - (s.length % 4)) % 4); const b = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(b, (c) => c.charCodeAt(0)); }
 
 export function useNotifications() {
@@ -31,11 +32,13 @@ export function WatchPanel({ productId, best, onAlert }: { productId: string; be
   const [watch, setWatch] = useState<{ target: number | null; last_price: number; opts?: WatchOpts } | null>(null);
   const [target, setTarget] = useState(""); const [msg, setMsg] = useState(""); const [push, setPush] = useState<string>("unknown");
   const [opts, setOpts] = useState<WatchOpts>({ alertAtl: true, nearLowPct: 5, alertStock: true, alertCoupon: false });
+  const [ab, setAb] = useState<{ enabled: boolean; maxPrice: string; monthlyCap: string; mode: "approval" | "auto"; firedAt?: string | null }>({ enabled: false, maxPrice: "", monthlyCap: "", mode: "approval" });
   useEffect(() => {
     fetch("/api/watch").then((r) => r.json()).then((ws) => {
       const w = ws.find((x: any) => x.product_id === productId);
       setWatch(w ?? null); setTarget(w?.target ? String(w.target) : "");
       if (w?.opts) setOpts({ alertAtl: !!w.opts.alertAtl, nearLowPct: w.opts.nearLowPct ?? 5, alertStock: !!w.opts.alertStock, alertCoupon: !!w.opts.alertCoupon });
+      const a = w?.opts?.autoBuy; if (a) setAb({ enabled: !!a.enabled, maxPrice: a.maxPrice ? String(a.maxPrice) : "", monthlyCap: a.monthlyCap ? String(a.monthlyCap) : "", mode: a.mode ?? "approval", firedAt: a.firedAt });
     });
     setPush(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
   }, [productId]);
@@ -51,12 +54,12 @@ export function WatchPanel({ productId, best, onAlert }: { productId: string; be
     } catch (e) { setMsg(`Push failed: ${(e as Error).message}`); }
   }
   async function save() {
-    const r = await (await fetch("/api/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId, target, ...opts }) })).json();
-    if (r.error) return setMsg(r.error); setWatch(r); setMsg(`Watching${r.target ? ` — alert at $${r.target.toFixed(2)}` : ""} · richer rules on`);
+    const r = await (await fetch("/api/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId, target, ...opts, autoBuy: ab }) })).json();
+    if (r.error) return setMsg(r.error); setWatch(r); setMsg(`Watching${r.target ? ` — alert at $${r.target.toFixed(2)}` : ""} · richer rules on${r.opts?.autoBuy?.enabled ? ` · auto-buy armed ≤ $${Number(r.opts.autoBuy.maxPrice).toFixed(2)}` : ""}`);
   }
   async function simulate() {
     const r = await (await fetch("/api/alerts/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId }) })).json();
-    const x = r.results?.[0]; setMsg(r.error ?? (x?.alerted ? `Alert sent: ${x.alert.body} Channels: ${Object.entries(x.channels).map(([k, v]) => `${k} ${v}`).join(" · ")}` : `New price $${x?.price}; no alert`));
+    const x = r.results?.[0]; setMsg(r.error ?? (x?.autoBuy ? `🤖 Auto-buy ${x.autoBuy.status.replace("_", " ")}: $${x.autoBuy.amount.toFixed(2)} at ${x.autoBuy.retailer}${x.autoBuy.approve_url ? " — approve link sent" : ""}` : x?.alerted ? `Alert sent: ${x.alert.body} Channels: ${Object.entries(x.channels).map(([k, v]) => `${k} ${v}`).join(" · ")}` : `New price $${x?.price}; no alert`));
     onAlert();
   }
   return (<div className="card" data-testid="watch"><h3>Price-drop alerts</h3>
@@ -72,6 +75,14 @@ export function WatchPanel({ productId, best, onAlert }: { productId: string; be
       <label className="check"><input type="checkbox" checked={!!opts.alertStock} onChange={(e) => setOpts({ ...opts, alertStock: e.target.checked })} /> Back in stock</label>
       <label className="check"><input type="checkbox" checked={!!opts.alertCoupon} onChange={(e) => setOpts({ ...opts, alertCoupon: e.target.checked })} /> New coupon</label>
     </div>
+    <div className="alertrules autobuy" data-testid="autobuy">
+      <label className="check"><input type="checkbox" checked={ab.enabled} onChange={(e) => setAb({ ...ab, enabled: e.target.checked })} /> 🤖 Auto-buy at</label>
+      <input aria-label="autobuy-max" style={{ width: 90 }} placeholder={target || "max $"} value={ab.maxPrice} onChange={(e) => setAb({ ...ab, maxPrice: e.target.value })} />
+      <label className="check">Monthly cap <input aria-label="autobuy-cap" style={{ width: 80 }} placeholder="$" value={ab.monthlyCap} onChange={(e) => setAb({ ...ab, monthlyCap: e.target.value })} /></label>
+      <select aria-label="autobuy-mode" value={ab.mode} onChange={(e) => setAb({ ...ab, mode: e.target.value as "approval" | "auto" })}>
+        <option value="approval">Ask me to approve (PayPal link)</option><option value="auto">Fully automatic (sandbox)</option></select>
+    </div>
+    {ab.firedAt && !ab.enabled && <div className="note">Auto-buy fired {new Date(ab.firedAt).toLocaleString()} — re-check the box to arm it again.</div>}
     {watch && <div className="note">Last checked best price: ${Number(watch.last_price).toFixed(2)}{watch.target ? ` · target $${Number(watch.target).toFixed(2)}` : ""} · scheduled checks run via /api/cron/check-prices</div>}
     {msg && <div className="note ok" data-testid="watchmsg">{msg}</div>}</div>);
 }

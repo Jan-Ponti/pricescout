@@ -8,6 +8,7 @@ export const TABLES: Record<string, TableDef> = {
   notifications: { cols: [["id", "SERIAL"], ["product_id", "TEXT"], ["title", "TEXT"], ["body", "TEXT"], ["url", "TEXT"], ["created", "TEXT"], ["read", "INTEGER", "DEFAULT 0"]], pk: ["id"] },
   sim_drops: { cols: [["product_id", "TEXT"], ["factor", "REAL"]], pk: ["product_id"] },
   kv: { cols: [["k", "TEXT"], ["v", "TEXT"]], pk: ["k"] },
+  purchases: { cols: [["id", "TEXT"], ["order_id", "TEXT"], ["product_id", "TEXT"], ["product_name", "TEXT"], ["retailer", "TEXT"], ["amount", "REAL"], ["status", "TEXT"], ["mode", "TEXT"], ["source", "TEXT"], ["approve_url", "TEXT"], ["note", "TEXT"], ["created", "TEXT"], ["updated", "TEXT"]], pk: ["id"] },
   orders: { cols: [["id", "TEXT"], ["product_id", "TEXT"], ["retailer", "TEXT"], ["amount", "REAL"], ["status", "TEXT"], ["created", "TEXT"]], pk: ["id"] },
 };
 

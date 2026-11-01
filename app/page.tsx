@@ -4,6 +4,7 @@ import PriceChart from "./PriceChart";
 import { WatchPanel, NotificationCenter, useNotifications } from "./Alerts";
 import Watchlist from "./Watchlist";
 import PrefsPanel from "./Prefs";
+import Purchases from "./Purchases";
 
 type Deal = {
   retailer: string; price: number; shipping: number; inStock: boolean; source: string; discount: number;
@@ -79,6 +80,7 @@ export default function Home() {
         const c = await (await fetch("/api/checkout/test-card", opts)).json();
         if (c.error) throw new Error(c.error);
         setResult(`✅ Payment ${c.status} — PayPal order ${c.id}, capture ${c.captureId ?? "n/a"} ($${c.amount ?? c.expected}) via ${c.via}`);
+        setWatchKey((k) => k + 1);
         setMsgs((m) => [...m, { role: "bot", text: `Done! Paid **${$(checkout.effectivePrice)}** for ${a.product.name} at ${checkout.retailer}. PayPal order \`${c.id}\` is **${c.status}**.` }]);
       }
     } catch (e) { setResult(`❌ ${(e as Error).message}`); } finally { setBusy(false); }
@@ -99,6 +101,7 @@ export default function Home() {
       </section>
       <section>
         <div className="grid"><PrefsPanel onChange={() => { onPrefs(); }} /><Watchlist refreshKey={watchKey} onOpen={openProduct} /></div>
+        <div className="grid"><Purchases refreshKey={watchKey + chartKey} /></div>
         {!a ? <div className="card empty"><h2>What are we buying today?</h2><p>Name a product in the chat. I&apos;ll rank by total cost, score the deal, apply coupons, and chart price history.</p></div> : <>
         <div className="card hero"><div className="emoji">{a.product.image}</div>
           <div><h2>{a.product.name}</h2><div style={{ color: "var(--muted)", fontSize: 14 }}>{a.product.brand} · {a.product.category} · MSRP {$(a.product.msrp)}</div></div>
