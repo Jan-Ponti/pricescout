@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 type Note = { id: number; title: string; body: string; url: string; created: string; read: number };
+type WatchOpts = { alertAtl?: boolean; nearLowPct?: number | null; alertStock?: boolean; alertCoupon?: boolean };
 function b64ToU8(s: string) { const p = "=".repeat((4 - (s.length % 4)) % 4); const b = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(b, (c) => c.charCodeAt(0)); }
 
 export function useNotifications() {
@@ -27,10 +28,15 @@ export function NotificationCenter({ notes, refresh }: { notes: Note[]; refresh:
 }
 
 export function WatchPanel({ productId, best, onAlert }: { productId: string; best: number; onAlert: () => void }) {
-  const [watch, setWatch] = useState<{ target: number | null; last_price: number } | null>(null);
+  const [watch, setWatch] = useState<{ target: number | null; last_price: number; opts?: WatchOpts } | null>(null);
   const [target, setTarget] = useState(""); const [msg, setMsg] = useState(""); const [push, setPush] = useState<string>("unknown");
+  const [opts, setOpts] = useState<WatchOpts>({ alertAtl: true, nearLowPct: 5, alertStock: true, alertCoupon: false });
   useEffect(() => {
-    fetch("/api/watch").then((r) => r.json()).then((ws) => { const w = ws.find((x: any) => x.product_id === productId); setWatch(w ?? null); setTarget(w?.target ? String(w.target) : ""); });
+    fetch("/api/watch").then((r) => r.json()).then((ws) => {
+      const w = ws.find((x: any) => x.product_id === productId);
+      setWatch(w ?? null); setTarget(w?.target ? String(w.target) : "");
+      if (w?.opts) setOpts({ alertAtl: !!w.opts.alertAtl, nearLowPct: w.opts.nearLowPct ?? 5, alertStock: !!w.opts.alertStock, alertCoupon: !!w.opts.alertCoupon });
+    });
     setPush(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
   }, [productId]);
   async function enablePush() {
@@ -45,8 +51,8 @@ export function WatchPanel({ productId, best, onAlert }: { productId: string; be
     } catch (e) { setMsg(`Push failed: ${(e as Error).message}`); }
   }
   async function save() {
-    const r = await (await fetch("/api/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId, target }) })).json();
-    if (r.error) return setMsg(r.error); setWatch(r); setMsg(`Watching${r.target ? ` — alert at $${r.target.toFixed(2)} or any drop` : " — alert on any price drop"}`);
+    const r = await (await fetch("/api/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId, target, ...opts }) })).json();
+    if (r.error) return setMsg(r.error); setWatch(r); setMsg(`Watching${r.target ? ` — alert at $${r.target.toFixed(2)}` : ""} · richer rules on`);
   }
   async function simulate() {
     const r = await (await fetch("/api/alerts/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId }) })).json();
@@ -60,6 +66,12 @@ export function WatchPanel({ productId, best, onAlert }: { productId: string; be
       {watch && <button className="ghost" onClick={async () => { await fetch(`/api/watch?productId=${productId}`, { method: "DELETE" }); setWatch(null); setMsg("Stopped watching (simulated drops reset)"); }}>Unwatch</button>}
       <button className="ghost" onClick={enablePush} disabled={push === "granted" && msg.includes("enabled")}>{push === "granted" ? "🔔 Push on" : "Enable browser push"}</button>
       <button className="ghost" disabled={!watch} onClick={simulate}>⚡ Simulate price drop</button></div>
+    <div className="alertrules">
+      <label className="check"><input type="checkbox" checked={!!opts.alertAtl} onChange={(e) => setOpts({ ...opts, alertAtl: e.target.checked })} /> All-time low</label>
+      <label className="check">Within % of low <input aria-label="near-low" style={{ width: 56 }} type="number" value={opts.nearLowPct ?? ""} onChange={(e) => setOpts({ ...opts, nearLowPct: e.target.value === "" ? null : Number(e.target.value) })} /></label>
+      <label className="check"><input type="checkbox" checked={!!opts.alertStock} onChange={(e) => setOpts({ ...opts, alertStock: e.target.checked })} /> Back in stock</label>
+      <label className="check"><input type="checkbox" checked={!!opts.alertCoupon} onChange={(e) => setOpts({ ...opts, alertCoupon: e.target.checked })} /> New coupon</label>
+    </div>
     {watch && <div className="note">Last checked best price: ${Number(watch.last_price).toFixed(2)}{watch.target ? ` · target $${Number(watch.target).toFixed(2)}` : ""} · scheduled checks run via /api/cron/check-prices</div>}
     {msg && <div className="note ok" data-testid="watchmsg">{msg}</div>}</div>);
 }

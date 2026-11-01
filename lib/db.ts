@@ -1,10 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
-import type { PricePoint } from "./types";
+import type { PricePoint, WatchOpts } from "./types";
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const FILE = path.join(DATA_DIR, "prices.sqlite");
 let dbp: Promise<Database> | null = null;
+
+function cols(db: Database, table: string): Set<string> {
+  const r = db.exec(`PRAGMA table_info(${table})`);
+  return new Set((r[0]?.values ?? []).map((v) => String(v[1])));
+}
+function ensureColumn(db: Database, table: string, col: string, decl: string) {
+  if (!cols(db, table).has(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+}
+
 export function getDb(): Promise<Database> {
   if (!dbp) dbp = (async () => {
     const SQL = await initSqlJs({ locateFile: (f) => path.join(process.cwd(), "node_modules/sql.js/dist", f) });
@@ -16,6 +25,7 @@ export function getDb(): Promise<Database> {
             CREATE TABLE IF NOT EXISTS sim_drops (product_id TEXT PRIMARY KEY, factor REAL);
             CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
             CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, product_id TEXT, retailer TEXT, amount REAL, status TEXT, created TEXT);`);
+    ensureColumn(db, "watches", "opts", "TEXT");
     return db;
   })();
   return dbp;
@@ -44,3 +54,9 @@ export async function query(sql: string, params: (string | number | null)[] = []
 }
 export async function run(sql: string, params: (string | number | null)[] = []) { const db = await getDb(); db.run(sql, params); persist(db); }
 export async function getSimFactor(productId: string) { return Number((await query("SELECT factor FROM sim_drops WHERE product_id = ?", [productId]))[0]?.factor ?? 1); }
+
+export function parseWatchOpts(raw: unknown): WatchOpts {
+  if (!raw) return {};
+  try { return typeof raw === "string" ? JSON.parse(raw) : (raw as WatchOpts); } catch { return {}; }
+}
+export function serializeWatchOpts(opts: WatchOpts): string { return JSON.stringify(opts ?? {}); }

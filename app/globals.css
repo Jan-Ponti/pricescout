@@ -34,3 +34,20 @@ tr.best td{background:#0f2c22}.tag{font-size:11px;padding:2px 7px;border-radius:
 .notecard{border-bottom:1px solid var(--line);padding:10px 0;font-size:13px}.notecard small{color:var(--muted)}
 header>div:last-child{display:flex;align-items:center;gap:4px}
 .couponlist{max-height:300px;overflow:auto;padding-right:4px}
+.prefsform{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px;align-items:end}
+.prefsform label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.prefsform label.check,.alertrules .check{flex-direction:row;align-items:center;gap:6px;color:var(--text);font-size:13px}
+.prefsform .mems{display:flex;flex-wrap:wrap;gap:6px;grid-column:1/-1}
+.alertrules{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:13px}
+.watchgrid{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.watchrow{display:grid;grid-template-columns:44px 1fr auto auto auto;gap:10px;align-items:center;text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--text);cursor:pointer;width:100%}
+.watchrow:hover{border-color:var(--brand)}
+.watchmeta{display:flex;flex-direction:column;gap:2px;min-width:0}.watchmeta b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.watchmeta small{color:var(--muted);font-size:11px}
+.emoji.sm{font-size:22px;width:40px;height:40px;border-radius:10px}
+.scorepill{display:inline-grid;place-items:center;min-width:36px;height:28px;border-radius:8px;background:#2fd38a22;color:var(--good);font-weight:700;font-size:13px}
+.verdict{text-transform:uppercase;font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 8px;border-radius:8px}
+.verdict.buy,.predict.buy{--v:var(--good)}.verdict.wait,.predict.wait{--v:#ffc439}.verdict.watch,.predict.watch{--v:var(--muted)}
+.verdict{color:var(--v);background:color-mix(in srgb,var(--v) 18%,transparent)}
+.predict{margin-top:20px;border-color:color-mix(in srgb,var(--v,var(--line)) 40%,var(--line))}
+.verdict-lg{font-size:22px;color:var(--v,var(--text));margin-right:8px}
+.reasons{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
