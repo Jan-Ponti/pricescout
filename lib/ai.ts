@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { CATALOG, matchProduct } from "./catalog";
 import { predictionBlurb } from "./predict";
+import { payLaterOptions } from "./paylater";
 import type { Product, Deal, Insight, ShopperPrefs } from "./types";
 export const aiEnabled = () => Boolean(process.env.OPENAI_API_KEY);
 const client = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY, baseURL: process.env.OPENAI_BASE_URL || undefined });
@@ -35,7 +36,9 @@ export function ruleAdvice(p: Product, deals: Deal[], ins: Insight, prefs?: Shop
     ? (b.totalCost <= prefs.budget ? ` Fits your $${prefs.budget} budget.` : ` Over your $${prefs.budget} budget by $${(b.totalCost - prefs.budget).toFixed(2)}.`)
     : "";
   const scoreNote = ` Deal score **${b.score}/100**.`;
-  return `I found **${p.name}** at ${deals.length} retailers. Best deal: **${b.retailer}** at $${b.effectivePrice.toFixed(2)}${b.coupon ? ` with code \`${b.coupon.code}\` (saves $${b.discount.toFixed(2)})` : ""}.${taxNote}${budgetNote}${scoreNote} ${pred}${ins.lowest ? ` Lowest tracked: $${ins.lowest.price.toFixed(2)} at ${ins.lowest.retailer} on ${ins.lowest.date}.` : ""} Say "buy it" or press Checkout to pay with PayPal — I'll only charge after you approve.`;
+  const pl = payLaterOptions(b.effectivePrice).label;
+  const payLaterNote = pl ? ` ${pl}.` : "";
+  return `I found **${p.name}** at ${deals.length} retailers. Best deal: **${b.retailer}** at $${b.effectivePrice.toFixed(2)}${b.coupon ? ` with code \`${b.coupon.code}\` (saves $${b.discount.toFixed(2)})` : ""}.${taxNote}${budgetNote}${scoreNote} ${pred}${ins.lowest ? ` Lowest tracked: $${ins.lowest.price.toFixed(2)} at ${ins.lowest.retailer} on ${ins.lowest.date}.` : ""}${payLaterNote} Say "buy it" or press Checkout to pay with PayPal — I'll only charge after you approve.`;
 }
 export async function advise(p: Product, deals: Deal[], ins: Insight, prefs?: ShopperPrefs): Promise<{ text: string; via: "llm" | "rules" }> {
   const fallback = ruleAdvice(p, deals, ins, prefs);
@@ -44,14 +47,14 @@ export async function advise(p: Product, deals: Deal[], ins: Insight, prefs?: Sh
     const r = await client().chat.completions.create({
       model: model(), temperature: 0.4,
       messages: [
-        { role: "system", content: "You are a concise shopping agent. In <=100 words using markdown bold, recommend the best deal (mention total cost with tax if present), deal score, coupon if any, and buy/wait/watch based on facts.prediction.verdict. Never invent numbers. Your recommendation MUST match facts.prediction.verdict and facts.ruleVerdict. End by saying the user can approve a PayPal checkout." },
+        { role: "system", content: "You are a concise shopping agent. In <=100 words using markdown bold, recommend the best deal (mention total cost with tax if present), deal score, coupon if any, and buy/wait/watch based on facts.prediction.verdict. If facts.payLater.label is non-empty, add one short sentence with the PayPal Pay Later option (Pay in 4 / monthly), calling it an estimate. Never invent numbers. Your recommendation MUST match facts.prediction.verdict and facts.ruleVerdict. End by saying the user can approve a PayPal checkout." },
         { role: "user", content: JSON.stringify({
           product: p.name, prefs,
           deals: deals.slice(0, 5).map(({ retailer, price, shipping, discount, effectivePrice, totalCost, tax, score, inStock, coupon, condition, etaDays }) =>
             ({ retailer, price, shipping, discount, effectivePrice, totalCost, tax, score, inStock, coupon: coupon?.code, condition, etaDays })),
           history: { lowest: ins.lowest, avg90: ins.avg90, current: ins.current },
           prediction: ins.prediction,
-          facts: { ruleVerdict: fallback },
+          facts: { ruleVerdict: fallback, payLater: payLaterOptions(deals[0].effectivePrice) },
         }) },
       ],
     });

@@ -5,6 +5,7 @@ import { WatchPanel, NotificationCenter, useNotifications } from "./Alerts";
 import Watchlist from "./Watchlist";
 import PrefsPanel from "./Prefs";
 import Purchases from "./Purchases";
+import PayLater from "./PayLater";
 
 type Deal = {
   retailer: string; price: number; shipping: number; inStock: boolean; source: string; discount: number;
@@ -33,7 +34,7 @@ const SUGGEST = [
 export default function Home() {
   const [msgs, setMsgs] = useState<Msg[]>([{ role: "bot", text: "Hi! I'm **PriceScout**. Tell me what you want — I'll compare total cost (tax + memberships), score deals, chart history, watch for drops, and check out with **PayPal** once you approve." }]);
   const [input, setInput] = useState(""); const [busy, setBusy] = useState(false);
-  const [a, setA] = useState<Analysis | null>(null); const [status, setStatus] = useState<{ ai: boolean; paypal: boolean } | null>(null);
+  const [a, setA] = useState<Analysis | null>(null); const [status, setStatus] = useState<{ ai: boolean; paypal: boolean; paypalClientId?: string | null } | null>(null);
   const [checkout, setCheckout] = useState<Deal | null>(null); const [result, setResult] = useState<string | null>(null); const [chartKey, setChartKey] = useState(0);
   const [watchKey, setWatchKey] = useState(0);
   const end = useRef<HTMLDivElement>(null);
@@ -105,7 +106,7 @@ export default function Home() {
         {!a ? <div className="card empty"><h2>What are we buying today?</h2><p>Name a product in the chat. I&apos;ll rank by total cost, score the deal, apply coupons, and chart price history.</p></div> : <>
         <div className="card hero"><div className="emoji">{a.product.image}</div>
           <div><h2>{a.product.name}</h2><div style={{ color: "var(--muted)", fontSize: 14 }}>{a.product.brand} · {a.product.category} · MSRP {$(a.product.msrp)}</div></div>
-          <div className="stats"><div className="stat"><small>Best total</small><b className="ok">{$(best!.totalCost)}</b><small>{best!.retailer} · score {best!.score}</small></div>
+          <div className="stats"><div className="stat"><small>Best total</small><b className="ok">{$(best!.totalCost)}</b><small>{best!.retailer} · score {best!.score}</small><PayLater amount={best!.effectivePrice} clientId={status?.paypalClientId} /></div>
             <div className="stat"><small>90-day avg</small><b>{$(a.insight.avg90)}</b></div>
             <div className="stat"><small>All-time low</small><b>{a.insight.lowest ? $(a.insight.lowest.price) : "–"}</b><small>{a.insight.lowest?.date}</small></div>
             <button className="pp" style={{ alignSelf: "center" }} onClick={() => { setResult(null); setCheckout(best!); }}>Checkout with PayPal</button></div></div>
@@ -122,7 +123,7 @@ export default function Home() {
               <td>{$(d.price)}{d.coupon ? <div className="note" style={{ margin: 0 }}><code>{d.coupon.code}</code></div> : null}</td>
               <td>{d.shipping ? $(d.shipping) : "Free"}{d.membershipSave ? <div className="note ok" style={{ margin: 0 }}>−{$(d.membershipSave)} perk</div> : null}</td>
               <td>{$(d.tax)}</td>
-              <td><b>{$(d.totalCost)}</b>{!d.inStock && <span className="err"> (out of stock)</span>}{d.etaDays != null && <div className="note" style={{ margin: 0 }}>~{d.etaDays}d</div>}</td>
+              <td><b>{$(d.totalCost)}</b><PayLater compact amount={d.effectivePrice} />{!d.inStock && <span className="err"> (out of stock)</span>}{d.etaDays != null && <div className="note" style={{ margin: 0 }}>~{d.etaDays}d</div>}</td>
               <td><span className="scorepill" title={d.scoreReasons?.join(" · ")}>{d.score}</span></td>
               <td><button className="ghost" disabled={!d.inStock} onClick={() => { setResult(null); setCheckout(d); }}>Buy</button></td></tr>)}
           </tbody></table><div className="note">Ranked by estimated total (price + shipping − coupon − membership + tax). Checkout still charges the retailer amount before tax. Sources: {a.sources.prices.join(", ")}</div></div>
@@ -144,6 +145,7 @@ export default function Home() {
       <div className="row"><span>Est. tax</span><span>{$(checkout.tax)}</span></div>
       <div className="row total"><span>Retailer total (charged)</span><span>{$(checkout.effectivePrice)}</span></div>
       <div className="row"><span>Est. all-in</span><span>{$(checkout.totalCost)}</span></div>
+      <PayLater amount={checkout.effectivePrice} clientId={status?.paypalClientId} />
       <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
         <button className="pp" disabled={busy} onClick={() => pay("paypal")}>Approve &amp; pay with PayPal</button>
         <button className="ghost" disabled={busy} onClick={() => pay("card")}>Instant sandbox test-card pay</button>
