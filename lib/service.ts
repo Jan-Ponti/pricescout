@@ -6,6 +6,8 @@ import { getPrefs } from "./prefs";
 import { predictBuyWait } from "./predict";
 import type { Product, Offer, Coupon, ShopperPrefs } from "./types";
 import { round2 } from "./rand";
+import { spentThisMonth } from "./purchases";
+import { budgetStatus, applyBudget } from "./budget";
 
 export async function analyze(p: Product, prefsOverride?: Partial<ShopperPrefs>) {
   if (!(await hasHistory(p.id))) for (const pr of priceProviders) if (pr.getSeedHistory) await saveSnapshots(p.id, pr.getSeedHistory(p, 730));
@@ -22,10 +24,11 @@ export async function analyze(p: Product, prefsOverride?: Partial<ShopperPrefs>)
   const avg90 = round2(r90.reduce((s, r) => s + (r.best as number), 0) / Math.max(1, r90.length));
   // First pass without insight scoring, then re-score with history context
   const deals = bestDeals(offers, coupons, prefs, { lowest: low, avg90 });
-  const prediction = predictBuyWait(deals, { lowest: low, avg90, current: deals[0]?.effectivePrice ?? 0 }, p);
+  const budget = budgetStatus(await spentThisMonth(), prefs.monthlyBudget);
+  const prediction = applyBudget(predictBuyWait(deals, { lowest: low, avg90, current: deals[0]?.effectivePrice ?? 0 }, p), deals[0]?.effectivePrice ?? 0, budget);
   return {
     deals, coupons, prefs,
-    insight: { lowest: low, avg90, current: deals[0]?.effectivePrice ?? 0, prediction },
+    insight: { lowest: low, avg90, current: deals[0]?.effectivePrice ?? 0, prediction, budget },
     sources: { prices: priceProviders.map((x) => x.name), coupons: couponProviders.map((x) => x.name) },
   };
 }
