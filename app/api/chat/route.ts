@@ -3,6 +3,8 @@ import { identifyProduct, advise, aiEnabled, wantsToBuy } from "@/lib/ai";
 import { analyze } from "@/lib/service";
 import { getProduct, CATALOG } from "@/lib/catalog";
 import { findUrl, identifyFromUrl } from "@/lib/identify";
+import { spentThisMonth } from "@/lib/purchases";
+import { budgetStatus } from "@/lib/budget";
 import { parseConstraints, setPrefs, getPrefs } from "@/lib/prefs";
 export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
@@ -24,6 +26,10 @@ export async function POST(req: Request) {
   if (Object.keys(constraints).length) await setPrefs(constraints);
   const prefs = await getPrefs();
 
+  if (/\b(how much (have i|did i) spen[dt]|spent so far|budget left|left (in|of) my budget)\b/i.test(message) || (constraints.monthlyBudget != null && Object.keys(constraints).length === 1 && message.split(" ").length < 10)) {
+    const b = budgetStatus(await spentThisMonth(), prefs.monthlyBudget);
+    return NextResponse.json({ reply: b.monthlyBudget ? `You've committed **$${b.spent.toFixed(2)}** of your **$${b.monthlyBudget.toFixed(2)}** monthly budget — **$${b.remaining!.toFixed(2)}** left. Auto-buy will never go over it.` : `You've committed **$${b.spent.toFixed(2)}** this month. Set a monthly budget (e.g. "monthly budget $500") and I'll keep purchases under it.`, product: null, prefs, ai: aiEnabled(), budget: b });
+  }
   const { product, via } = await identifyProduct(message);
   if (!product) {
     const hint = Object.keys(constraints).length
@@ -40,6 +46,7 @@ export async function POST(req: Request) {
 function summarizePrefs(c: Record<string, unknown>) {
   const bits: string[] = [];
   if (c.budget != null) bits.push(`budget $${c.budget}`);
+  if (c.monthlyBudget != null) bits.push(`monthly budget $${c.monthlyBudget}`);
   if (c.zip) bits.push(`ZIP ${c.zip}`);
   if (c.needBy) bits.push(`need by ${c.needBy}`);
   if (c.allowOpenBox) bits.push("open-box OK");
