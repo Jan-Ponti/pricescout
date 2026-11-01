@@ -7,6 +7,10 @@ services:
     startCommand: npm start
     healthCheckPath: /api/status
     envVars:
+      - key: DATABASE_URL     # optional: Postgres for persistent data (free Render Postgres expires after ~30 days)
+        fromDatabase:
+          name: pricescout-db
+          property: connectionString
       - key: NODE_VERSION
         value: 20
       - key: PAYPAL_ENV
@@ -39,6 +43,13 @@ services:
         sync: false
       - key: ALERT_SMS_TO
         sync: false
+databases:
+  - name: pricescout-db
+    plan: free
+    region: oregon
+    databaseName: pricescout
+    user: pricescout
+    ipAllowList: []   # internal access only
 # No Render cron job (cron jobs are not available on the free plan).
 # Scheduled price checks: point a free external pinger (e.g. cron-job.org or a GitHub
 # Actions schedule) at POST $APP_URL/api/cron/check-prices with

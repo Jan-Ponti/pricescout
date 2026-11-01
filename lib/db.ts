@@ -2,57 +2,84 @@ import fs from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 import type { PricePoint, WatchOpts } from "./types";
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
-const FILE = path.join(DATA_DIR, "prices.sqlite");
-let dbp: Promise<Database> | null = null;
+import { TABLES, createTableDdl, addColumnDdl, toPg } from "./schema";
 
-function cols(db: Database, table: string): Set<string> {
-  const r = db.exec(`PRAGMA table_info(${table})`);
-  return new Set((r[0]?.values ?? []).map((v) => String(v[1])));
-}
-function ensureColumn(db: Database, table: string, col: string, decl: string) {
-  if (!cols(db, table).has(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
-}
+type Param = string | number | null;
+type Row = Record<string, any>;
+/** Storage backend. SQLite (sql.js, file in DATA_DIR) by default; Postgres when DATABASE_URL is set. */
+interface Backend { kind: "sqlite" | "postgres"; query(sql: string, params: Param[]): Promise<Row[]>; run(sql: string, params: Param[]): Promise<void>; runMany(sql: string, rows: Param[][]): Promise<void> }
 
+const dataDir = () => process.env.DATA_DIR || path.join(process.cwd(), "data");
+export const usingPostgres = () => Boolean(process.env.DATABASE_URL);
+
+let sqliteP: Promise<Database> | null = null;
+/** Low-level sql.js handle (SQLite mode only). */
 export function getDb(): Promise<Database> {
-  if (!dbp) dbp = (async () => {
+  if (!sqliteP) sqliteP = (async () => {
     const SQL = await initSqlJs({ locateFile: (f) => path.join(process.cwd(), "node_modules/sql.js/dist", f) });
-    const db = fs.existsSync(FILE) ? new SQL.Database(fs.readFileSync(FILE)) : new SQL.Database();
-    db.run(`CREATE TABLE IF NOT EXISTS snapshots (product_id TEXT, retailer TEXT, date TEXT, price REAL, PRIMARY KEY(product_id, retailer, date));
-            CREATE TABLE IF NOT EXISTS watches (product_id TEXT PRIMARY KEY, target REAL, last_price REAL, created TEXT);
-            CREATE TABLE IF NOT EXISTS push_subs (endpoint TEXT PRIMARY KEY, json TEXT);
-            CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id TEXT, title TEXT, body TEXT, url TEXT, created TEXT, read INTEGER DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS sim_drops (product_id TEXT PRIMARY KEY, factor REAL);
-            CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
-            CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, product_id TEXT, retailer TEXT, amount REAL, status TEXT, created TEXT);`);
-    ensureColumn(db, "watches", "opts", "TEXT");
+    const file = path.join(dataDir(), "prices.sqlite");
+    const db = fs.existsSync(file) ? new SQL.Database(fs.readFileSync(file)) : new SQL.Database();
+    for (const name of Object.keys(TABLES)) {
+      db.run(createTableDdl("sqlite", name));
+      const have = new Set((db.exec(`PRAGMA table_info(${name})`)[0]?.values ?? []).map((v) => String(v[1])));
+      for (const c of TABLES[name].cols) if (!have.has(c[0])) db.run(addColumnDdl("sqlite", name, c));
+    }
     return db;
   })();
-  return dbp;
+  return sqliteP;
 }
-export function persist(db: Database) { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(FILE, Buffer.from(db.export())); }
+export function persist(db: Database) { fs.mkdirSync(dataDir(), { recursive: true }); fs.writeFileSync(path.join(dataDir(), "prices.sqlite"), Buffer.from(db.export())); }
+
+const sqliteBackend: Backend = {
+  kind: "sqlite",
+  async query(sql, params) { const db = await getDb(); const r = db.exec(sql, params)[0]; if (!r) return []; return r.values.map((v) => Object.fromEntries(r.columns.map((c, i) => [c, v[i]]))); },
+  async run(sql, params) { const db = await getDb(); db.run(sql, params); persist(db); },
+  async runMany(sql, rows) { const db = await getDb(); const st = db.prepare(sql); db.run("BEGIN"); for (const r of rows) st.run(r); db.run("COMMIT"); st.free(); persist(db); },
+};
+
+let pgP: Promise<import("pg").Pool> | null = null;
+/** Postgres pool; the schema is auto-migrated (CREATE TABLE / ADD COLUMN IF NOT EXISTS) on first use. */
+export function getPool() {
+  if (!pgP) pgP = (async () => {
+    const { Pool } = (await import("pg")).default ?? (await import("pg"));
+    const url = process.env.DATABASE_URL!;
+    const local = /@(localhost|127\.0\.0\.1|dpg-[a-z0-9]+-a)(:|\/)/.test(url); // Render internal hosts don't use TLS
+    const pool = new Pool({ connectionString: url, max: 5, ssl: local || /sslmode=disable/.test(url) ? undefined : { rejectUnauthorized: false } });
+    for (const name of Object.keys(TABLES)) {
+      await pool.query(createTableDdl("pg", name));
+      for (const c of TABLES[name].cols) if (c[1] !== "SERIAL") await pool.query(addColumnDdl("pg", name, c));
+    }
+    return pool;
+  })().catch((e) => { pgP = null; throw e; });
+  return pgP;
+}
+const pgBackend: Backend = {
+  kind: "postgres",
+  async query(sql, params) { return (await (await getPool()).query(toPg(sql), params)).rows; },
+  async run(sql, params) { await (await getPool()).query(toPg(sql), params); },
+  async runMany(sql, rows) {
+    const c = await (await getPool()).connect(); const q = toPg(sql);
+    try { await c.query("BEGIN"); for (const r of rows) await c.query(q, r); await c.query("COMMIT"); } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
+  },
+};
+export const backend = (): Backend => (usingPostgres() ? pgBackend : sqliteBackend);
+
+export async function query(sql: string, params: Param[] = []) { return backend().query(sql, params); }
+export async function run(sql: string, params: Param[] = []) { return backend().run(sql, params); }
+
 export async function saveSnapshots(productId: string, pts: PricePoint[]) {
-  const db = await getDb(); const st = db.prepare("INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?)");
-  db.run("BEGIN"); for (const p of pts) st.run([productId, p.retailer, p.date, p.price]); db.run("COMMIT"); st.free(); persist(db);
+  await backend().runMany("INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?)", pts.map((p) => [productId, p.retailer, p.date, p.price]));
 }
 export async function hasHistory(productId: string) {
-  const db = await getDb(); const r = db.exec("SELECT COUNT(*) FROM snapshots WHERE product_id = ?", [productId]);
-  return Number(r[0]?.values[0][0] ?? 0) > 0;
+  return Number((await query("SELECT COUNT(*) AS n FROM snapshots WHERE product_id = ?", [productId]))[0]?.n ?? 0) > 0;
 }
 export async function getHistory(productId: string, sinceDate?: string): Promise<PricePoint[]> {
-  const db = await getDb();
-  const r = db.exec("SELECT date, retailer, price FROM snapshots WHERE product_id = ? AND date >= ? ORDER BY date", [productId, sinceDate ?? "0000"]);
-  return (r[0]?.values ?? []).map(([date, retailer, price]) => ({ date: String(date), retailer: String(retailer), price: Number(price) }));
+  return (await query("SELECT date, retailer, price FROM snapshots WHERE product_id = ? AND date >= ? ORDER BY date", [productId, sinceDate ?? "0000"]))
+    .map((r) => ({ date: String(r.date), retailer: String(r.retailer), price: Number(r.price) }));
 }
 export async function recordOrder(id: string, productId: string, retailer: string, amount: number, status: string) {
-  const db = await getDb(); db.run("INSERT OR REPLACE INTO orders VALUES (?,?,?,?,?,?)", [id, productId, retailer, amount, status, new Date().toISOString()]); persist(db);
+  await run("INSERT OR REPLACE INTO orders VALUES (?,?,?,?,?,?)", [id, productId, retailer, amount, status, new Date().toISOString()]);
 }
-
-export async function query(sql: string, params: (string | number | null)[] = []) {
-  const db = await getDb(); const r = db.exec(sql, params)[0]; if (!r) return [] as Record<string, any>[];
-  return r.values.map((v) => Object.fromEntries(r.columns.map((c, i) => [c, v[i]])));
-}
-export async function run(sql: string, params: (string | number | null)[] = []) { const db = await getDb(); db.run(sql, params); persist(db); }
 export async function getSimFactor(productId: string) { return Number((await query("SELECT factor FROM sim_drops WHERE product_id = ?", [productId]))[0]?.factor ?? 1); }
 
 export function parseWatchOpts(raw: unknown): WatchOpts {

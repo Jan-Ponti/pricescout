@@ -53,6 +53,7 @@ Checks: `npm run lint`, `npm test` (vitest), `npm run build`. With the app runni
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | LLM (optional) |
 | `APP_URL` | Public URL used in alert links (Render sets `RENDER_EXTERNAL_URL` automatically) |
 | `DATA_DIR` | SQLite location (default `./data`) |
+| `DATABASE_URL` | Optional Postgres connection string. When set, all data goes to Postgres instead of SQLite; tables and new columns are created automatically on startup |
 | `CRON_SECRET` | If set, the cron endpoint needs `Authorization: Bearer <secret>` |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push. `npm run vapid` appends generated keys to `.env.local`. If unset, keys are generated once and stored in SQLite |
 | `ALERT_EMAIL_TO`, `ALERT_EMAIL_FROM`, `RESEND_API_KEY` **or** `SMTP_HOST/PORT/SECURE/USER/PASS` | Email alerts |
@@ -68,7 +69,8 @@ Checks: `npm run lint`, `npm test` (vitest), `npm run build`. With the app runni
 `render.yaml` defines a single `pricescout` web service on Render's **free plan**. Create a Blueprint from the repo and fill in the `sync: false` secrets.
 
 **Free-plan notes**
-- **No persistent disk.** SQLite lives in `./data` on the instance's ephemeral filesystem, so watches, alerts, push subscriptions and orders reset on every redeploy, restart or idle spin-down. Price history is reseeded automatically (deterministic 2-year demo history is generated the first time a product is looked up), so the chart always works. To keep data, switch to the Starter plan and add a disk with `DATA_DIR=/var/data`.
+- **Persistent data via free Render Postgres.** Set `DATABASE_URL` (the blueprint wires it to `pricescout-db`) and watches, alerts, push subscriptions and orders survive restarts and redeploys. Render's free Postgres expires about 30 days after creation, so recreate it (or upgrade) after that; the app falls back to SQLite if `DATABASE_URL` is removed.
+- **No persistent disk.** Without `DATABASE_URL`, SQLite lives in `./data` on the instance's ephemeral filesystem, so watches, alerts, push subscriptions and orders reset on every redeploy, restart or idle spin-down. Price history is reseeded automatically (deterministic 2-year demo history is generated the first time a product is looked up), so the chart always works. To keep data, switch to the Starter plan and add a disk with `DATA_DIR=/var/data`.
 - **No Render cron job** (not free). For scheduled checks, use a free external scheduler (e.g. cron-job.org or a GitHub Actions `schedule`) to `POST $APP_URL/api/cron/check-prices` with `Authorization: Bearer $CRON_SECRET` (copy the generated value from the Render dashboard). For demos, use **⚡ Simulate price drop**.
 - Free instances sleep after ~15 minutes idle; the first request takes ~30-60s to wake.
 
