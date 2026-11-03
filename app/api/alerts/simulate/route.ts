@@ -1,3 +1,4 @@
+import { publicOrigin } from "@/lib/origin";
 import { currentVisitor, vk } from "@/lib/visitor";
 import { NextResponse } from "next/server";
 import { query, run } from "@/lib/db";
@@ -11,7 +12,7 @@ export async function POST(req: Request) {
   if (!bought && !(await query("SELECT 1 FROM watches WHERE visitor = ? AND product_id = ?", [currentVisitor(), productId])).length) return NextResponse.json({ error: "Watch this product first" }, { status: 400 });
   const cur = Number((await query("SELECT factor FROM sim_drops WHERE visitor = ? AND product_id = ?", [currentVisitor(), productId]))[0]?.factor ?? 1);
   await run("INSERT OR REPLACE INTO sim_drops (visitor, product_id, factor) VALUES (?,?,?)", [currentVisitor(), productId, Math.max(0.3, cur * (1 - Number(pct) / 100))]);
-  const results = await checkWatches(new URL(req.url).origin);
-  const protection = await checkProtection(appUrl(new URL(req.url).origin));
+  const results = await checkWatches(publicOrigin(req));
+  const protection = await checkProtection(appUrl(publicOrigin(req)));
   return NextResponse.json({ results: results.filter((r) => r.productId === productId), protection });
 }
