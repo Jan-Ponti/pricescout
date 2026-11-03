@@ -1,3 +1,4 @@
+import { publicOrigin } from "@/lib/origin";
 import { currentVisitor, vk, withVisitor, DEFAULT_VISITOR } from "./visitor";
 import crypto from "node:crypto";
 import { query, run } from "./db";
@@ -85,7 +86,7 @@ export async function startGift(req: Request, token: string, productId: string, 
   if (!watched) throw Object.assign(new Error("not on this wishlist"), { status: 400 });
   if (await getGift(productId)) throw Object.assign(new Error("already gifted"), { status: 409 });
   const { input } = await buildCheckout(req, productId);
-  const origin = new URL(req.url).origin;
+  const origin = publicOrigin(req);
   input.returnUrl = `${origin}/w/${token}?gift=${encodeURIComponent(productId)}`;
   input.cancelUrl = `${origin}/w/${token}?cancelled=1`;
   const amount = Math.round((input.price + input.shipping - input.discount) * 100) / 100;

@@ -1,3 +1,4 @@
+import { publicOrigin } from "@/lib/origin";
 import { NextResponse } from "next/server";
 import { seedDemo, resetVisitorData } from "@/lib/demo";
 import { query } from "@/lib/db";
@@ -15,6 +16,6 @@ export async function POST(req: Request) {
   const { action = "seed" } = await req.json().catch(() => ({}));
   try {
     if (action === "reset") return NextResponse.json(await resetVisitorData());
-    return NextResponse.json(await seedDemo(new URL(req.url).origin));
+    return NextResponse.json(await seedDemo(publicOrigin(req)));
   } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }); }
 }
