@@ -10,6 +10,13 @@ import Protection from "./Protection";
 import Reviews from "./Reviews";
 import { api, onSlow, friendlyError } from "@/lib/client/api";
 import DemoStart, { ResetDemo } from "./DemoStart";
+import AgentTimeline from "./Timeline";
+import AutoBuyToast from "./Toast";
+import { useDialog } from "./a11y";
+import type { Step } from "@/lib/timeline";
+
+const TABS = ["Chat", "Deal", "Watchlist", "Account"] as const;
+type Tab = typeof TABS[number];
 
 type Deal = {
   retailer: string; price: number; shipping: number; inStock: boolean; source: string; discount: number;
@@ -24,7 +31,7 @@ type Analysis = {
   insight: { lowest: { date: string; price: number; retailer: string } | null; avg90: number; current: number; prediction?: Prediction };
   sources: { prices: string[]; coupons: string[] }; prefs?: { zip?: string; budget?: number };
 };
-type Msg = { role: "user" | "bot"; text: string; track?: { id: string; name: string }; retry?: () => void; error?: boolean };
+type Msg = { role: "user" | "bot"; text: string; track?: { id: string; name: string }; retry?: () => void; error?: boolean; steps?: Step[] };
 
 const md = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
 const $ = (n: number) => `$${n.toFixed(2)}`;
@@ -43,10 +50,17 @@ export default function Home() {
   const [checkout, setCheckout] = useState<Deal | null>(null); const [result, setResult] = useState<string | null>(null); const [chartKey, setChartKey] = useState(0);
   const [watchKey, setWatchKey] = useState(0);
   const [statusErr, setStatusErr] = useState(false); const [slow, setSlow] = useState(false); const [loadingDeal, setLoadingDeal] = useState(false);
+  const [tab, setTab] = useState<Tab>("Chat");
+  const tc = (t: Tab, extra = "") => `${extra}${tab === t ? " tab-on" : ""}`.trim();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeCheckout = useCallback(() => { if (!busyRef.current) setCheckout(null); }, []);
+  const busyRef = useRef(false);
   const [acct, setAcct] = useState<{ empty: boolean } | null>(null);
   const loadAcct = useCallback(() => { api<{ empty: boolean }>("/api/demo").then(setAcct).catch(() => setAcct({ empty: false })); }, []);
   useEffect(() => { loadAcct(); }, [loadAcct, watchKey]);
   useEffect(() => onSlow(setSlow), []);
+  busyRef.current = busy;
+  useDialog(dialogRef, !!checkout, closeCheckout);
   /** Post a friendly bot error with a Retry button. */
   const fail = useCallback((e: unknown, retry?: () => void) => setMsgs((m) => [...m, { role: "bot", text: `⚠️ ${friendlyError(e)}`, retry, error: true }]), []);
   const end = useRef<HTMLDivElement>(null);
@@ -59,7 +73,10 @@ export default function Home() {
   const onPrefsRef = useRef(onPrefs); onPrefsRef.current = onPrefs;
   useEffect(() => { api("/api/status").then(setStatus).catch(() => setStatusErr(true)); }, []);
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search); const id = q.get("buy"); if (!id) return;
+    const q = new URLSearchParams(window.location.search);
+    const deep = q.get("product");
+    if (deep && !q.get("buy")) { openProductRef.current(deep, "a shared link"); setTab("Deal"); }
+    const id = q.get("buy"); if (!id) return;
     fetch(`/api/analyze?productId=${encodeURIComponent(id)}`).then((r) => r.json()).then((r) => { if (!r.deals) return;
       setA(r); setCheckout(r.deals.find((d: Deal) => d.retailer === q.get("retailer")) ?? r.deals[0]);
       setMsgs((m) => [...m, { role: "bot", text: `Price alert for **${r.product.name}** — review and approve the PayPal checkout.` }]); });
@@ -73,7 +90,7 @@ export default function Home() {
     setInput(""); setBusy(true); setLoadingDeal(true);
     try {
       const r = await api("/api/chat", { json: { message: text, currentProductId: a?.product.id } });
-      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? "Done.", track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined }]);
+      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? "Done.", track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined, steps: r.steps }]);
       if (r.deals) setA(r);
       if (r.intent === "checkout" && (r.deals?.[0] || a?.deals[0])) { setResult(null); setCheckout(r.deals?.[0] ?? a!.deals[0]); }
     } catch (e) { fail(e, () => send(text, true)); } finally { setBusy(false); setLoadingDeal(false); }
@@ -100,12 +117,14 @@ export default function Home() {
     } catch (e) { fail(e, () => track(t)); }
   }
   async function openProduct(productId: string, from = "your watchlist") {
-    setLoadingDeal(true);
+    setLoadingDeal(true); setTab("Deal");
     try {
       const r = await api(`/api/analyze?productId=${encodeURIComponent(productId)}`);
       if (r?.deals) { setA(r); setMsgs((m) => [...m, { role: "bot", text: `Opened **${r.product.name}** from ${from}.` }]); }
+      else setMsgs((m) => [...m, { role: "bot", text: `I couldn't find a product called \`${productId}\`.`, error: true }]);
     } catch (e) { fail(e, () => openProduct(productId, from)); } finally { setLoadingDeal(false); }
   }
+  const openProductRef = useRef(openProduct); openProductRef.current = openProduct;
   async function pay(mode: "paypal" | "card") {
     if (!a || !checkout) return; setBusy(true); setResult(null);
     try {
@@ -130,23 +149,27 @@ export default function Home() {
     <header><div className="logo">Price<span>Scout</span> <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 14 }}>AI shopping agent · PayPal checkout</span></div>
       <div>{statusErr && <span className="pill" title="Couldn't load /api/status" data-testid="status-unknown">○ Status unavailable</span>}{status && <><span className={`pill ${status.ai ? "on" : ""}`}>{status.ai ? "● LLM connected" : "○ Rule-based AI (no key)"}</span>
         <span className={`pill ${status.paypal ? "on" : ""}`}>{status.paypal ? "● PayPal sandbox" : "○ PayPal simulated"}</span></>} <NotificationCenter notes={notes} refresh={refresh} /></div></header>
+    <nav className="tabs" role="tablist" aria-label="Sections">{TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} data-testid={`tab-${t}`} onClick={() => setTab(t)}>{t}</button>)}</nav>
+    <AutoBuyToast refreshKey={watchKey} />
     {slow && <div className="slowbar" role="status" data-testid="slow-notice">⏳ Waking up the server… free hosting sleeps when idle, this can take up to a minute.</div>}
     <main>
-      <section className="card chat">
-        <div className="msgs">{msgs.map((m, i) => <div key={i} className={`msg ${m.role}${m.error ? " error" : ""}`}><span dangerouslySetInnerHTML={{ __html: md(m.text) }} />{m.track && <div><button className="ghost" data-testid="start-tracking" onClick={() => track(m.track!)}>👀 Start tracking</button></div>}
+      <section className={tc("Chat", "card chat")} data-tab="Chat" aria-label="Chat">
+        <div className="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">{msgs.map((m, i) => <div key={i} className={`msg ${m.role}${m.error ? " error" : ""}`}><span dangerouslySetInnerHTML={{ __html: md(m.text) }} /><AgentTimeline steps={m.steps ?? []} />{m.track && <div><button className="ghost" data-testid="start-tracking" onClick={() => track(m.track!)}>👀 Start tracking</button></div>}
             {m.retry && i === msgs.length - 1 && <div><button className="ghost" data-testid="retry" disabled={busy} onClick={() => m.retry!()}>↻ Retry</button></div>}</div>)}
-          {busy && <div className="msg bot" aria-label="Thinking"><div className="skeleton line" /><div className="skeleton line short" /></div>}<div ref={end} /></div>
-        <div className="chips">{SUGGEST.map((s) => <button key={s} className="ghost" onClick={() => send(s)}>{s}</button>)}</div>
+          {busy && <div className="msg bot" role="status" aria-label="Thinking"><div className="skeleton line" /><div className="skeleton line short" /></div>}<div ref={end} /></div>
+        <div className="chips" aria-label="Suggestions">{SUGGEST.map((s) => <button key={s} className="ghost" onClick={() => send(s)}>{s}</button>)}</div>
         <form className="input" onSubmit={(e) => { e.preventDefault(); send(input); }}>
-          <input aria-label="chat" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Name a product, paste a product link, or 📷 a photo" /><label className="ghost" title="Upload a product photo" style={{ cursor: "pointer", padding: "0 8px", alignSelf: "center" }}>📷<input type="file" accept="image/*" hidden aria-label="upload photo" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} /></label><button disabled={busy}>Send</button></form>
+          <input aria-label="Ask PriceScout about a product" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Name a product, paste a product link, or 📷 a photo" /><label className="ghost" title="Upload a product photo" style={{ cursor: "pointer", padding: "0 8px", alignSelf: "center" }}>📷<input type="file" accept="image/*" hidden aria-label="upload photo" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} /></label><button disabled={busy} aria-label="Send message">Send</button></form>
       </section>
       <section>
-        {acct?.empty && !a && <DemoStart onSeeded={() => { setWatchKey((k) => k + 1); refresh(); }} onTry={(q) => send(q)} />}
-        <div className="grid"><PrefsPanel onChange={() => { onPrefs(); }} />{acct && !acct.empty && <Watchlist refreshKey={watchKey} onOpen={openProduct} />}</div>
+        {acct?.empty && !a && <div data-tab="Deal" className={tc("Deal")}><DemoStart onSeeded={() => { setWatchKey((k) => k + 1); refresh(); }} onTry={(q) => { setTab("Chat"); send(q); }} /></div>}
+        <div className={tc("Account", "grid")} data-tab="Account"><PrefsPanel onChange={() => { onPrefs(); }} /></div>
+        {acct && !acct.empty && <div className={tc("Watchlist", "grid")} data-tab="Watchlist"><Watchlist refreshKey={watchKey} onOpen={openProduct} /></div>}
         {acct && !acct.empty && <>
-          <div className="grid"><Purchases refreshKey={watchKey + chartKey} /></div>
-          <div className="grid"><Protection refreshKey={watchKey + chartKey} /></div>
+          <div className={tc("Account", "grid")} data-tab="Account"><Purchases refreshKey={watchKey + chartKey} /></div>
+          <div className={tc("Account", "grid")} data-tab="Account"><Protection refreshKey={watchKey + chartKey} /></div>
         </>}
+        <div data-tab="Deal" className={tc("Deal")}>
         {loadingDeal && !a ? <div className="card" data-testid="deal-skeleton"><div className="skeleton block" /><div className="skeleton line" /><div className="skeleton line short" /></div> :
         !a ? (acct?.empty ? null : <div className="card empty"><h2>What are we buying today?</h2><p>Name a product in the chat. I&apos;ll rank by total cost, score the deal, apply coupons, and chart price history.</p></div>) : <>
         <div className="card hero"><div className="emoji">{a.product.image}</div>
@@ -164,15 +187,15 @@ export default function Home() {
           </div>
         </div>}
         <div className="grid two">
-          <div className="card"><h3>Price comparison (total cost)</h3><table><thead><tr><th>Retailer</th><th>Price</th><th>Ship</th><th>Tax</th><th>You pay</th><th>Score</th><th></th></tr></thead><tbody>
-            {a.deals.map((d, i) => <tr key={d.retailer + (d.condition ?? "")} className={i === 0 ? "best" : ""}><td>{d.retailer}{i === 0 && <span className="tag">BEST</span>}{d.source === "mock" && <span className="tag mock">mock</span>}{d.condition && d.condition !== "new" && <span className="tag mock">{d.condition.replace("_", " ")}</span>}</td>
-              <td>{$(d.price)}{d.coupon ? <div className="note" style={{ margin: 0 }}><code>{d.coupon.code}</code></div> : null}</td>
-              <td>{d.shipping ? $(d.shipping) : "Free"}{d.membershipSave ? <div className="note ok" style={{ margin: 0 }}>−{$(d.membershipSave)} perk</div> : null}</td>
-              <td>{$(d.tax)}</td>
-              <td><b>{$(d.totalCost)}</b><PayLater compact amount={d.effectivePrice} />{!d.inStock && <span className="err"> (out of stock)</span>}{d.etaDays != null && <div className="note" style={{ margin: 0 }}>~{d.etaDays}d</div>}</td>
-              <td><span className="scorepill" title={d.scoreReasons?.join(" · ")}>{d.score}</span></td>
-              <td><button className="ghost" disabled={!d.inStock} onClick={() => { setResult(null); setCheckout(d); }}>Buy</button></td></tr>)}
-          </tbody></table><div className="note">Ranked by estimated total (price + shipping − coupon − membership + tax). Checkout still charges the retailer amount before tax. Sources: {a.sources.prices.join(", ")}</div></div>
+          <div className="card"><h3>Price comparison (total cost)</h3><div className="tablewrap"><table className="cards"><thead><tr><th>Retailer</th><th>Price</th><th>Ship</th><th>Tax</th><th>You pay</th><th>Score</th><th></th></tr></thead><tbody>
+            {a.deals.map((d, i) => <tr key={d.retailer + (d.condition ?? "")} className={i === 0 ? "best" : ""}><td data-label="Retailer">{d.retailer}{i === 0 && <span className="tag">BEST</span>}{d.source === "mock" && <span className="tag mock">mock</span>}{d.condition && d.condition !== "new" && <span className="tag mock">{d.condition.replace("_", " ")}</span>}</td>
+              <td data-label="Price">{$(d.price)}{d.coupon ? <div className="note" style={{ margin: 0 }}><code>{d.coupon.code}</code></div> : null}</td>
+              <td data-label="Ship">{d.shipping ? $(d.shipping) : "Free"}{d.membershipSave ? <div className="note ok" style={{ margin: 0 }}>−{$(d.membershipSave)} perk</div> : null}</td>
+              <td data-label="Tax">{$(d.tax)}</td>
+              <td data-label="You pay"><b>{$(d.totalCost)}</b><PayLater compact amount={d.effectivePrice} />{!d.inStock && <span className="err"> (out of stock)</span>}{d.etaDays != null && <div className="note" style={{ margin: 0 }}>~{d.etaDays}d</div>}</td>
+              <td data-label="Score"><span className="scorepill" title={d.scoreReasons?.join(" · ")}>{d.score}</span></td>
+              <td><button className="ghost" disabled={!d.inStock} aria-label={`Buy from ${d.retailer}`} onClick={() => { setResult(null); setCheckout(d); }}>Buy</button></td></tr>)}
+          </tbody></table></div><div className="note">Ranked by estimated total (price + shipping − coupon − membership + tax). Checkout still charges the retailer amount before tax. Sources: {a.sources.prices.join(", ")}</div></div>
           <div className="card couponcard"><h3>Coupons found ({a.coupons.filter((c) => c.verified).length} valid)</h3><div className="couponlist">{a.coupons.length === 0 && <div className="note">No codes found.</div>}
             {a.coupons.map((c) => <div key={c.retailer + c.code} className={`coupon ${c.verified ? "" : "bad"}`}><div><code>{c.code}</code> · {c.retailer}<div className="note" style={{ margin: 0 }}>{c.description}</div></div>
               <span className={c.verified ? "ok" : "err"}>{c.verified ? "✓ valid" : "✗ expired"}</span></div>)}
@@ -180,11 +203,12 @@ export default function Home() {
         </div>
         <div className="grid"><WatchPanel key={a.product.id} productId={a.product.id} best={best!.effectivePrice} onAlert={async () => { refresh(); const r = await (await fetch(`/api/analyze?productId=${a.product.id}`)).json(); if (r.deals) setA(r); setChartKey((k) => k + 1); setWatchKey((k) => k + 1); }} /></div>
         <div className="grid"><div className="card"><PriceChart key={chartKey} productId={a.product.id} /></div></div></>}
-        {acct && !acct.empty && <ResetDemo onReset={() => { setA(null); setWatchKey((k) => k + 1); refresh(); }} />}
+        </div>
+        {acct && !acct.empty && <div data-tab="Account" className={tc("Account")}><ResetDemo onReset={() => { setA(null); setWatchKey((k) => k + 1); refresh(); }} /></div>}
       </section>
     </main>
-    {checkout && a && <div className="modal" onClick={() => !busy && setCheckout(null)}><div className="card" onClick={(e) => e.stopPropagation()}>
-      <h2>Approve purchase</h2><div className="note" style={{ marginTop: 0 }}>The agent will not pay until you approve.</div>
+    {checkout && a && <div className="modal" onClick={closeCheckout}><div className="card" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="checkout-title" onClick={(e) => e.stopPropagation()}>
+      <h2 id="checkout-title">Approve purchase</h2><div className="note" style={{ marginTop: 0 }}>The agent will not pay until you approve.</div>
       <div className="row"><span>{a.product.name}</span></div><div className="row"><span>Retailer</span><span>{checkout.retailer}</span></div>
       <div className="row"><span>Price</span><span>{$(checkout.price)}</span></div><div className="row"><span>Shipping</span><span>{checkout.shipping ? $(checkout.shipping) : "Free"}</span></div>
       {checkout.coupon && <div className="row ok"><span>Coupon {checkout.coupon.code}</span><span>−{$(checkout.discount)}</span></div>}
@@ -197,7 +221,7 @@ export default function Home() {
         <button className="pp" disabled={busy} onClick={() => pay("paypal")}>Approve &amp; pay with PayPal</button>
         <button className="ghost" disabled={busy} onClick={() => pay("card")}>Instant sandbox test-card pay</button>
         <button className="ghost" disabled={busy} onClick={() => setCheckout(null)}>Cancel</button></div>
-      {result && <div className={`note ${result.startsWith("✅") ? "ok" : "err"}`} data-testid="result">{result}</div>}
+      {result && <div className={`note ${result.startsWith("✅") ? "ok" : "err"}`} data-testid="result" role="status" aria-live="polite">{result}</div>}
       <div className="note">PayPal sandbox — no real money moves. Tax is an estimate for ranking; the PayPal order uses the retailer amount.</div>
     </div></div>}
   </>);
