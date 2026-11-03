@@ -25,7 +25,7 @@ describe("checker + channels", () => {
     expect(r.channels.email).toMatch(/disabled/); expect(r.channels.sms).toMatch(/disabled/);
     expect((await query("SELECT * FROM notifications")).length).toBe(1);
     const [again] = await checkWatches() as any[]; expect(again.alerted).toBe(false);
-    await run("INSERT OR REPLACE INTO sim_drops VALUES (?, 0.8)", ["kindle-paperwhite"]);
+    await run("INSERT OR REPLACE INTO sim_drops (visitor, product_id, factor) VALUES ('default', ?, 0.8)", ["kindle-paperwhite"]);
     const [dropped] = await checkWatches() as any[]; expect(dropped.alerted).toBe(true); expect(dropped.alert.drop).toBeGreaterThan(0);
   });
   it("generates and persists VAPID keys when env is unset", async () => {

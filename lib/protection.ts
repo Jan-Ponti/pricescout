@@ -1,3 +1,4 @@
+import { currentVisitor, vk } from "./visitor";
 import { query, run } from "./db";
 import { getProduct } from "./catalog";
 import { analyze } from "./service";
@@ -37,15 +38,15 @@ async function draftFor(base: Omit<ProtectionClaim, "draft" | "via" | "notifiedA
   return aiText("Write a short, polite price-adjustment/refund request email from a shopper to a retailer's support team. Start with a 'Subject:' line. Use ONLY the facts given; never invent policy names or numbers. Sign off with '[Your name]'.",
     JSON.stringify(base), fb);
 }
-const kvKey = (id: string) => `protect:${id}`;
+const kvKey = (id: string) => vk(`protect:${id}`);
 export async function listClaims(): Promise<ProtectionClaim[]> {
-  return (await query("SELECT v FROM kv WHERE k LIKE 'protect:%'")).map((r) => JSON.parse(String(r.v)) as ProtectionClaim).sort((a, b) => b.notifiedAt.localeCompare(a.notifiedAt));
+  return (await query("SELECT v FROM kv WHERE k LIKE ?", [vk("protect:") + "%"])).map((r) => JSON.parse(String(r.v)) as ProtectionClaim).sort((a, b) => b.notifiedAt.localeCompare(a.notifiedAt));
 }
 /** After purchase, keep watching completed purchases; on a drop inside the window, alert via existing channels and store a copyable draft. */
 export async function checkProtection(appUrl = "http://localhost:3000", now = new Date()) {
   const days = windowDays((await getPrefs()).protectionDays);
   const since = new Date(now.getTime() - days * 86400000).toISOString();
-  const rows = await query("SELECT id, order_id, product_id, product_name, retailer, amount, status, created FROM purchases WHERE status = 'completed' AND created >= ?", [since]);
+  const rows = await query("SELECT id, order_id, product_id, product_name, retailer, amount, status, created FROM purchases WHERE visitor = ? AND status = 'completed' AND created >= ?", [currentVisitor(), since]);
   const out: Array<{ purchaseId: string; eligible: boolean; drop: number; channels?: Record<string, string> }> = [];
   for (const r of rows) {
     const p = getProduct(String(r.product_id)); if (!p) continue;

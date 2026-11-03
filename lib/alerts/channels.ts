@@ -1,3 +1,4 @@
+import { currentVisitor } from "../visitor";
 import webpush from "web-push";
 import nodemailer from "nodemailer";
 import { query, run } from "../db";
@@ -16,14 +17,14 @@ export async function vapidKeys(): Promise<{ publicKey: string; privateKey: stri
 
 export const inAppChannel: NotificationChannel = {
   name: "in-app", enabled: () => true,
-  async send(a) { await run("INSERT INTO notifications (product_id, title, body, url, created) VALUES (?,?,?,?,?)", [a.productId, a.title, a.body, a.url, new Date().toISOString()]); return { sent: 1 }; },
+  async send(a) { await run("INSERT INTO notifications (product_id, title, body, url, created, visitor) VALUES (?,?,?,?,?,?)", [a.productId, a.title, a.body, a.url, new Date().toISOString(), currentVisitor()]); return { sent: 1 }; },
 };
 
 export const webPushChannel: NotificationChannel = {
   name: "web-push", enabled: () => true,
   async send(a) {
     const k = await vapidKeys(); webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:alerts@pricescout.local", k.publicKey, k.privateKey);
-    const subs = await query("SELECT endpoint, json FROM push_subs"); let sent = 0; const errs: string[] = [];
+    const subs = await query("SELECT endpoint, json FROM push_subs WHERE visitor = ?", [currentVisitor()]); let sent = 0; const errs: string[] = [];
     for (const s of subs) {
       try { await webpush.sendNotification(JSON.parse(String(s.json)), JSON.stringify({ title: a.title, body: a.body, url: a.url })); sent++; }
       catch (e: any) { errs.push(String(e.statusCode ?? e.message)); if (e.statusCode === 404 || e.statusCode === 410) await run("DELETE FROM push_subs WHERE endpoint = ?", [String(s.endpoint)]); }

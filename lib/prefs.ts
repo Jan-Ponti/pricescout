@@ -1,3 +1,4 @@
+import { vk } from "./visitor";
 import type { ShopperPrefs } from "./types";
 
 /** Rough US sales-tax estimate by ZIP prefix (demo rates — not legal advice). */
@@ -25,7 +26,7 @@ export const DEFAULT_PREFS: ShopperPrefs = { zip: "", memberships: [], allowOpen
 
 export async function getPrefs(): Promise<ShopperPrefs> {
   const { query } = await import("./db");
-  const row = (await query("SELECT v FROM kv WHERE k = 'shopper_prefs'"))[0];
+  const row = (await query("SELECT v FROM kv WHERE k = ?", [vk("shopper_prefs")]))[0];
   if (!row) return { ...DEFAULT_PREFS };
   try { return { ...DEFAULT_PREFS, ...JSON.parse(String(row.v)) }; } catch { return { ...DEFAULT_PREFS }; }
 }
@@ -37,7 +38,7 @@ export async function setPrefs(patch: Partial<ShopperPrefs>): Promise<ShopperPre
   if (next.needBy != null && next.needBy !== "" && Number.isNaN(Date.parse(next.needBy))) next.needBy = undefined;
   if (next.monthlyBudget != null && !(Number(next.monthlyBudget) > 0)) next.monthlyBudget = undefined;
   if (next.protectionDays != null && !(Number(next.protectionDays) > 0 && Number(next.protectionDays) <= 365)) next.protectionDays = undefined;
-  await run("INSERT OR REPLACE INTO kv VALUES ('shopper_prefs', ?)", [JSON.stringify(next)]);
+  await run("INSERT OR REPLACE INTO kv VALUES (?, ?)", [vk("shopper_prefs"), JSON.stringify(next)]);
   return next;
 }
 

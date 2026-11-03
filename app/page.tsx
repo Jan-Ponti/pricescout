@@ -8,6 +8,8 @@ import Purchases from "./Purchases";
 import PayLater from "./PayLater";
 import Protection from "./Protection";
 import Reviews from "./Reviews";
+import { api, onSlow, friendlyError } from "@/lib/client/api";
+import DemoStart, { ResetDemo } from "./DemoStart";
 
 type Deal = {
   retailer: string; price: number; shipping: number; inStock: boolean; source: string; discount: number;
@@ -22,7 +24,7 @@ type Analysis = {
   insight: { lowest: { date: string; price: number; retailer: string } | null; avg90: number; current: number; prediction?: Prediction };
   sources: { prices: string[]; coupons: string[] }; prefs?: { zip?: string; budget?: number };
 };
-type Msg = { role: "user" | "bot"; text: string; track?: { id: string; name: string } };
+type Msg = { role: "user" | "bot"; text: string; track?: { id: string; name: string }; retry?: () => void; error?: boolean };
 
 const md = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
 const $ = (n: number) => `$${n.toFixed(2)}`;
@@ -40,14 +42,22 @@ export default function Home() {
   const [a, setA] = useState<Analysis | null>(null); const [status, setStatus] = useState<{ ai: boolean; paypal: boolean; paypalClientId?: string | null } | null>(null);
   const [checkout, setCheckout] = useState<Deal | null>(null); const [result, setResult] = useState<string | null>(null); const [chartKey, setChartKey] = useState(0);
   const [watchKey, setWatchKey] = useState(0);
+  const [statusErr, setStatusErr] = useState(false); const [slow, setSlow] = useState(false); const [loadingDeal, setLoadingDeal] = useState(false);
+  const [acct, setAcct] = useState<{ empty: boolean } | null>(null);
+  const loadAcct = useCallback(() => { api<{ empty: boolean }>("/api/demo").then(setAcct).catch(() => setAcct({ empty: false })); }, []);
+  useEffect(() => { loadAcct(); }, [loadAcct, watchKey]);
+  useEffect(() => onSlow(setSlow), []);
+  /** Post a friendly bot error with a Retry button. */
+  const fail = useCallback((e: unknown, retry?: () => void) => setMsgs((m) => [...m, { role: "bot", text: `⚠️ ${friendlyError(e)}`, retry, error: true }]), []);
   const end = useRef<HTMLDivElement>(null);
   const { notes, refresh } = useNotifications();
   const onPrefs = useCallback(async () => {
     if (!a?.product.id) return;
-    const r = await (await fetch(`/api/analyze?productId=${a.product.id}`)).json();
-    if (r.deals) setA(r);
-  }, [a?.product.id]);
-  useEffect(() => { fetch("/api/status").then((r) => r.json()).then(setStatus); }, []);
+    try { const r = await api(`/api/analyze?productId=${a.product.id}`); if (r?.deals) setA(r); }
+    catch (e) { fail(e, () => onPrefsRef.current()); }
+  }, [a?.product.id, fail]);
+  const onPrefsRef = useRef(onPrefs); onPrefsRef.current = onPrefs;
+  useEffect(() => { api("/api/status").then(setStatus).catch(() => setStatusErr(true)); }, []);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search); const id = q.get("buy"); if (!id) return;
     fetch(`/api/analyze?productId=${encodeURIComponent(id)}`).then((r) => r.json()).then((r) => { if (!r.deals) return;
@@ -57,33 +67,44 @@ export default function Home() {
   }, []);
   useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-  async function send(text: string) {
+  async function send(text: string, isRetry = false) {
     if (!text.trim() || busy) return;
-    setMsgs((m) => [...m, { role: "user", text }]); setInput(""); setBusy(true);
+    if (!isRetry) setMsgs((m) => [...m, { role: "user", text }]);
+    setInput(""); setBusy(true); setLoadingDeal(true);
     try {
-      const r = await (await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, currentProductId: a?.product.id }) })).json();
-      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? r.error, track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined }]);
+      const r = await api("/api/chat", { json: { message: text, currentProductId: a?.product.id } });
+      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? "Done.", track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined }]);
       if (r.deals) setA(r);
       if (r.intent === "checkout" && (r.deals?.[0] || a?.deals[0])) { setResult(null); setCheckout(r.deals?.[0] ?? a!.deals[0]); }
-    } finally { setBusy(false); }
+    } catch (e) { fail(e, () => send(text, true)); } finally { setBusy(false); setLoadingDeal(false); }
   }
   async function upload(f: File) {
     if (busy) return; if (f.size > 4 * 1024 * 1024) { setMsgs((m) => [...m, { role: "bot", text: "That image is over 4 MB — try a smaller one." }]); return; }
-    setMsgs((m) => [...m, { role: "user", text: `📷 ${f.name}` }]); setBusy(true);
-    try {
-      const image = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(f); });
-      const r = await (await fetch("/api/identify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image, filename: f.name, caption: input }) })).json();
-      setMsgs((m) => [...m, { role: "bot", text: r.reply ?? r.error, track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined }]);
-      if (r.product) { const an = await (await fetch(`/api/analyze?productId=${r.product.id}`)).json(); if (an.deals) setA(an); }
-    } finally { setBusy(false); }
+    setMsgs((m) => [...m, { role: "user", text: `📷 ${f.name}` }]);
+    const caption = input;
+    const run = async () => {
+      setBusy(true); setLoadingDeal(true);
+      try {
+        const image = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(f); });
+        const r = await api("/api/identify", { json: { image, filename: f.name, caption } });
+        setMsgs((m) => [...m, { role: "bot", text: r.reply ?? "Done.", track: r.offerTrack && r.product ? { id: r.product.id, name: r.product.name } : undefined }]);
+        if (r.product) { const an = await api(`/api/analyze?productId=${r.product.id}`); if (an?.deals) setA(an); }
+      } catch (e) { fail(e, run); } finally { setBusy(false); setLoadingDeal(false); }
+    };
+    await run();
   }
   async function track(t: { id: string; name: string }) {
-    const r = await (await fetch("/api/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId: t.id }) })).json();
-    setMsgs((m) => [...m, { role: "bot", text: r.error ? `❌ ${r.error}` : `👀 Tracking **${t.name}** — I'll alert you when the price drops.` }]); setWatchKey((k) => k + 1);
+    try {
+      await api("/api/watch", { json: { productId: t.id } });
+      setMsgs((m) => [...m, { role: "bot", text: `👀 Tracking **${t.name}** — I'll alert you when the price drops.` }]); setWatchKey((k) => k + 1);
+    } catch (e) { fail(e, () => track(t)); }
   }
-  async function openProduct(productId: string) {
-    const r = await (await fetch(`/api/analyze?productId=${encodeURIComponent(productId)}`)).json();
-    if (r.deals) { setA(r); setMsgs((m) => [...m, { role: "bot", text: `Opened **${r.product.name}** from your watchlist.` }]); }
+  async function openProduct(productId: string, from = "your watchlist") {
+    setLoadingDeal(true);
+    try {
+      const r = await api(`/api/analyze?productId=${encodeURIComponent(productId)}`);
+      if (r?.deals) { setA(r); setMsgs((m) => [...m, { role: "bot", text: `Opened **${r.product.name}** from ${from}.` }]); }
+    } catch (e) { fail(e, () => openProduct(productId, from)); } finally { setLoadingDeal(false); }
   }
   async function pay(mode: "paypal" | "card") {
     if (!a || !checkout) return; setBusy(true); setResult(null);
@@ -107,21 +128,27 @@ export default function Home() {
   const pred = a?.insight.prediction;
   return (<>
     <header><div className="logo">Price<span>Scout</span> <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 14 }}>AI shopping agent · PayPal checkout</span></div>
-      <div>{status && <><span className={`pill ${status.ai ? "on" : ""}`}>{status.ai ? "● LLM connected" : "○ Rule-based AI (no key)"}</span>
+      <div>{statusErr && <span className="pill" title="Couldn't load /api/status" data-testid="status-unknown">○ Status unavailable</span>}{status && <><span className={`pill ${status.ai ? "on" : ""}`}>{status.ai ? "● LLM connected" : "○ Rule-based AI (no key)"}</span>
         <span className={`pill ${status.paypal ? "on" : ""}`}>{status.paypal ? "● PayPal sandbox" : "○ PayPal simulated"}</span></>} <NotificationCenter notes={notes} refresh={refresh} /></div></header>
+    {slow && <div className="slowbar" role="status" data-testid="slow-notice">⏳ Waking up the server… free hosting sleeps when idle, this can take up to a minute.</div>}
     <main>
       <section className="card chat">
-        <div className="msgs">{msgs.map((m, i) => <div key={i} className={`msg ${m.role}`}><span dangerouslySetInnerHTML={{ __html: md(m.text) }} />{m.track && <div><button className="ghost" data-testid="start-tracking" onClick={() => track(m.track!)}>👀 Start tracking</button></div>}</div>)}
-          {busy && <div className="msg bot">Thinking…</div>}<div ref={end} /></div>
+        <div className="msgs">{msgs.map((m, i) => <div key={i} className={`msg ${m.role}${m.error ? " error" : ""}`}><span dangerouslySetInnerHTML={{ __html: md(m.text) }} />{m.track && <div><button className="ghost" data-testid="start-tracking" onClick={() => track(m.track!)}>👀 Start tracking</button></div>}
+            {m.retry && i === msgs.length - 1 && <div><button className="ghost" data-testid="retry" disabled={busy} onClick={() => m.retry!()}>↻ Retry</button></div>}</div>)}
+          {busy && <div className="msg bot" aria-label="Thinking"><div className="skeleton line" /><div className="skeleton line short" /></div>}<div ref={end} /></div>
         <div className="chips">{SUGGEST.map((s) => <button key={s} className="ghost" onClick={() => send(s)}>{s}</button>)}</div>
         <form className="input" onSubmit={(e) => { e.preventDefault(); send(input); }}>
           <input aria-label="chat" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Name a product, paste a product link, or 📷 a photo" /><label className="ghost" title="Upload a product photo" style={{ cursor: "pointer", padding: "0 8px", alignSelf: "center" }}>📷<input type="file" accept="image/*" hidden aria-label="upload photo" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} /></label><button disabled={busy}>Send</button></form>
       </section>
       <section>
-        <div className="grid"><PrefsPanel onChange={() => { onPrefs(); }} /><Watchlist refreshKey={watchKey} onOpen={openProduct} /></div>
-        <div className="grid"><Purchases refreshKey={watchKey + chartKey} /></div>
-        <div className="grid"><Protection refreshKey={watchKey + chartKey} /></div>
-        {!a ? <div className="card empty"><h2>What are we buying today?</h2><p>Name a product in the chat. I&apos;ll rank by total cost, score the deal, apply coupons, and chart price history.</p></div> : <>
+        {acct?.empty && !a && <DemoStart onSeeded={() => { setWatchKey((k) => k + 1); refresh(); }} onTry={(q) => send(q)} />}
+        <div className="grid"><PrefsPanel onChange={() => { onPrefs(); }} />{acct && !acct.empty && <Watchlist refreshKey={watchKey} onOpen={openProduct} />}</div>
+        {acct && !acct.empty && <>
+          <div className="grid"><Purchases refreshKey={watchKey + chartKey} /></div>
+          <div className="grid"><Protection refreshKey={watchKey + chartKey} /></div>
+        </>}
+        {loadingDeal && !a ? <div className="card" data-testid="deal-skeleton"><div className="skeleton block" /><div className="skeleton line" /><div className="skeleton line short" /></div> :
+        !a ? (acct?.empty ? null : <div className="card empty"><h2>What are we buying today?</h2><p>Name a product in the chat. I&apos;ll rank by total cost, score the deal, apply coupons, and chart price history.</p></div>) : <>
         <div className="card hero"><div className="emoji">{a.product.image}</div>
           <div><h2>{a.product.name}</h2><div style={{ color: "var(--muted)", fontSize: 14 }}>{a.product.brand} · {a.product.category} · MSRP {$(a.product.msrp)}</div></div>
           <div className="stats"><div className="stat"><small>Best total</small><b className="ok">{$(best!.totalCost)}</b><small>{best!.retailer} · score {best!.score}</small><PayLater amount={best!.effectivePrice} clientId={status?.paypalClientId} /></div>
@@ -153,6 +180,7 @@ export default function Home() {
         </div>
         <div className="grid"><WatchPanel key={a.product.id} productId={a.product.id} best={best!.effectivePrice} onAlert={async () => { refresh(); const r = await (await fetch(`/api/analyze?productId=${a.product.id}`)).json(); if (r.deals) setA(r); setChartKey((k) => k + 1); setWatchKey((k) => k + 1); }} /></div>
         <div className="grid"><div className="card"><PriceChart key={chartKey} productId={a.product.id} /></div></div></>}
+        {acct && !acct.empty && <ResetDemo onReset={() => { setA(null); setWatchKey((k) => k + 1); refresh(); }} />}
       </section>
     </main>
     {checkout && a && <div className="modal" onClick={() => !busy && setCheckout(null)}><div className="card" onClick={(e) => e.stopPropagation()}>
