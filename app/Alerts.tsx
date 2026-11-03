@@ -19,9 +19,9 @@ export function useNotifications() {
 export function NotificationCenter({ notes, refresh }: { notes: Note[]; refresh: () => void }) {
   const [open, setOpen] = useState(false); const unread = notes.filter((n) => !n.read).length;
   return (<span style={{ position: "relative" }}>
-    <button className="ghost" aria-label="notifications" onClick={() => { setOpen(!open); if (!open && unread) fetch("/api/notifications", { method: "POST" }).then(refresh); }}>
+    <button className="ghost" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} aria-expanded={open} onClick={() => { setOpen(!open); if (!open && unread) fetch("/api/notifications", { method: "POST" }).then(refresh); }}>
       🔔{unread > 0 && <span className="badge">{unread}</span>}</button>
-    {open && <div className="card notes" data-testid="notes"><h3>Notifications</h3>{notes.length === 0 && <div className="note">No alerts yet. Watch a product to get price-drop alerts.</div>}
+    {open && <div className="card notes" data-testid="notes" role="region" aria-label="Notifications" aria-live="polite"><h3>Notifications</h3>{notes.length === 0 && <div className="note">No alerts yet. Watch a product to get price-drop alerts.</div>}
       {notes.map((n) => <div key={n.id} className="notecard"><b>{n.title}</b><div>{n.body}</div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}><small>{new Date(n.created).toLocaleString()}</small>
           <a href={n.url}><button className="pp">Buy with PayPal</button></a></div></div>)}</div>}
@@ -64,22 +64,22 @@ export function WatchPanel({ productId, best, onAlert }: { productId: string; be
   }
   return (<div className="card" data-testid="watch"><h3>Price-drop alerts</h3>
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-      <input aria-label="target" style={{ maxWidth: 160 }} placeholder={`Target (e.g. ${Math.floor(best * 0.9)})`} value={target} onChange={(e) => setTarget(e.target.value)} />
+      <input aria-label="Target price in dollars" style={{ maxWidth: 160 }} placeholder={`Target (e.g. ${Math.floor(best * 0.9)})`} value={target} onChange={(e) => setTarget(e.target.value)} />
       <button onClick={save}>{watch ? "Update watch" : "👁 Watch price"}</button>
       {watch && <button className="ghost" onClick={async () => { await fetch(`/api/watch?productId=${productId}`, { method: "DELETE" }); setWatch(null); setMsg("Stopped watching (simulated drops reset)"); }}>Unwatch</button>}
       <button className="ghost" onClick={enablePush} disabled={push === "granted" && msg.includes("enabled")}>{push === "granted" ? "🔔 Push on" : "Enable browser push"}</button>
       <button className="ghost" disabled={!watch} onClick={simulate}>⚡ Simulate price drop</button></div>
     <div className="alertrules">
       <label className="check"><input type="checkbox" checked={!!opts.alertAtl} onChange={(e) => setOpts({ ...opts, alertAtl: e.target.checked })} /> All-time low</label>
-      <label className="check">Within % of low <input aria-label="near-low" style={{ width: 56 }} type="number" value={opts.nearLowPct ?? ""} onChange={(e) => setOpts({ ...opts, nearLowPct: e.target.value === "" ? null : Number(e.target.value) })} /></label>
+      <label className="check">Within % of low <input aria-label="Alert within percent of all-time low" style={{ width: 56 }} type="number" value={opts.nearLowPct ?? ""} onChange={(e) => setOpts({ ...opts, nearLowPct: e.target.value === "" ? null : Number(e.target.value) })} /></label>
       <label className="check"><input type="checkbox" checked={!!opts.alertStock} onChange={(e) => setOpts({ ...opts, alertStock: e.target.checked })} /> Back in stock</label>
       <label className="check"><input type="checkbox" checked={!!opts.alertCoupon} onChange={(e) => setOpts({ ...opts, alertCoupon: e.target.checked })} /> New coupon</label>
     </div>
     <div className="alertrules autobuy" data-testid="autobuy">
       <label className="check"><input type="checkbox" checked={ab.enabled} onChange={(e) => setAb({ ...ab, enabled: e.target.checked })} /> 🤖 Auto-buy at</label>
-      <input aria-label="autobuy-max" style={{ width: 90 }} placeholder={target || "max $"} value={ab.maxPrice} onChange={(e) => setAb({ ...ab, maxPrice: e.target.value })} />
-      <label className="check">Monthly cap <input aria-label="autobuy-cap" style={{ width: 80 }} placeholder="$" value={ab.monthlyCap} onChange={(e) => setAb({ ...ab, monthlyCap: e.target.value })} /></label>
-      <select aria-label="autobuy-mode" value={ab.mode} onChange={(e) => setAb({ ...ab, mode: e.target.value as "approval" | "auto" })}>
+      <input aria-label="Auto-buy maximum price" style={{ width: 90 }} placeholder={target || "max $"} value={ab.maxPrice} onChange={(e) => setAb({ ...ab, maxPrice: e.target.value })} />
+      <label className="check">Monthly cap <input aria-label="Auto-buy monthly cap" style={{ width: 80 }} placeholder="$" value={ab.monthlyCap} onChange={(e) => setAb({ ...ab, monthlyCap: e.target.value })} /></label>
+      <select aria-label="Auto-buy mode" value={ab.mode} onChange={(e) => setAb({ ...ab, mode: e.target.value as "approval" | "auto" })}>
         <option value="approval">Ask me to approve (PayPal link)</option><option value="auto">Fully automatic (sandbox)</option></select>
     </div>
     {ab.firedAt && !ab.enabled && <div className="note">Auto-buy fired {new Date(ab.firedAt).toLocaleString()} — re-check the box to arm it again.</div>}
