@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 import type { PricePoint, WatchOpts } from "./types";
-import { TABLES, createTableDdl, addColumnDdl, toPg } from "./schema";
+import { TABLES, createTableDdl, addColumnDdl, toPg, needsRebuild, rebuildDdl } from "./schema";
+import { currentVisitor } from "./visitor";
 
 type Param = string | number | null;
 type Row = Record<string, any>;
@@ -20,8 +21,11 @@ export function getDb(): Promise<Database> {
     const file = path.join(dataDir(), "prices.sqlite");
     const db = fs.existsSync(file) ? new SQL.Database(fs.readFileSync(file)) : new SQL.Database();
     for (const name of Object.keys(TABLES)) {
+      const cols = () => new Set((db.exec(`PRAGMA table_info(${name})`)[0]?.values ?? []).map((v) => String(v[1])));
+      const before = cols();
+      if (needsRebuild(name, before)) { db.run("BEGIN"); for (const q of rebuildDdl("sqlite", name, before)) db.run(q); db.run("COMMIT"); }
       db.run(createTableDdl("sqlite", name));
-      const have = new Set((db.exec(`PRAGMA table_info(${name})`)[0]?.values ?? []).map((v) => String(v[1])));
+      const have = cols();
       for (const c of TABLES[name].cols) if (!have.has(c[0])) db.run(addColumnDdl("sqlite", name, c));
     }
     return db;
@@ -46,6 +50,11 @@ export function getPool() {
     const local = /@(localhost|127\.0\.0\.1|dpg-[a-z0-9]+-a)(:|\/)/.test(url); // Render internal hosts don't use TLS
     const pool = new Pool({ connectionString: url, max: 5, ssl: local || /sslmode=disable/.test(url) ? undefined : { rejectUnauthorized: false } });
     for (const name of Object.keys(TABLES)) {
+      const before = new Set<string>((await pool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1", [name])).rows.map((r: any) => String(r.column_name)));
+      if (needsRebuild(name, before)) {
+        const c = await pool.connect();
+        try { await c.query("BEGIN"); for (const q of rebuildDdl("pg", name, before)) await c.query(q); await c.query("COMMIT"); } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
+      }
       await pool.query(createTableDdl("pg", name));
       for (const c of TABLES[name].cols) if (c[1] !== "SERIAL") await pool.query(addColumnDdl("pg", name, c));
     }
@@ -78,12 +87,20 @@ export async function getHistory(productId: string, sinceDate?: string): Promise
     .map((r) => ({ date: String(r.date), retailer: String(r.retailer), price: Number(r.price) }));
 }
 export async function recordOrder(id: string, productId: string, retailer: string, amount: number, status: string) {
-  await run("INSERT OR REPLACE INTO orders VALUES (?,?,?,?,?,?)", [id, productId, retailer, amount, status, new Date().toISOString()]);
+  await run("INSERT OR REPLACE INTO orders (id, product_id, retailer, amount, status, created, visitor) VALUES (?,?,?,?,?,?,?)", [id, productId, retailer, amount, status, new Date().toISOString(), currentVisitor()]);
 }
-export async function getSimFactor(productId: string) { return Number((await query("SELECT factor FROM sim_drops WHERE product_id = ?", [productId]))[0]?.factor ?? 1); }
+export async function getSimFactor(productId: string) { return Number((await query("SELECT factor FROM sim_drops WHERE visitor = ? AND product_id = ?", [currentVisitor(), productId]))[0]?.factor ?? 1); }
 
 export function parseWatchOpts(raw: unknown): WatchOpts {
   if (!raw) return {};
   try { return typeof raw === "string" ? JSON.parse(raw) : (raw as WatchOpts); } catch { return {}; }
 }
 export function serializeWatchOpts(opts: WatchOpts): string { return JSON.stringify(opts ?? {}); }
+
+/** Every visitor that has watches or purchases (the cron job loops over these). */
+export async function listVisitors(): Promise<string[]> {
+  const rows = await query("SELECT DISTINCT visitor FROM watches UNION SELECT DISTINCT visitor FROM purchases");
+  return rows.map((r) => String(r.visitor ?? "default"));
+}
+/** For tests: drop the cached SQLite handle so a fresh DATA_DIR is opened. */
+export function _resetDbForTests() { sqliteP = null; }

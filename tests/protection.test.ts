@@ -24,7 +24,7 @@ describe("checkProtection", () => {
     const { deals } = await analyze(getProduct("kindle-paperwhite")!); const d = deals[0];
     await addPurchase({ order_id: "ORDER12345", product_id: "kindle-paperwhite", product_name: "Kindle", retailer: d.retailer, amount: d.effectivePrice, status: "completed", mode: "test-card", source: "chat", approve_url: null, note: null });
     expect((await checkProtection()).every((r) => !r.eligible)).toBe(true);
-    await run("INSERT OR REPLACE INTO sim_drops VALUES (?,?)", ["kindle-paperwhite", 0.8]);
+    await run("INSERT OR REPLACE INTO sim_drops (visitor, product_id, factor) VALUES ('default', ?,?)", ["kindle-paperwhite", 0.8]);
     const [r] = await checkProtection(); expect(r.eligible).toBe(true); expect(r.channels?.["in-app"]).toBe("sent 1");
     const [c] = await listClaims(); expect(c.via).toBe("rules"); expect(c.draft).toMatch(/price adjustment/i);
     const [again] = await checkProtection(); expect(again.channels).toBeUndefined();

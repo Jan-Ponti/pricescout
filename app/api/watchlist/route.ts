@@ -1,3 +1,4 @@
+import { currentVisitor, vk } from "@/lib/visitor";
 import { NextResponse } from "next/server";
 import { query, parseWatchOpts, getHistory } from "@/lib/db";
 import { getProduct } from "@/lib/catalog";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 /** Enriched watchlist: current deal, % to target, sparkline, prediction. */
 export async function GET() {
-  const watches = await query("SELECT * FROM watches ORDER BY created DESC");
+  const watches = await query("SELECT * FROM watches WHERE visitor = ? ORDER BY created DESC", [currentVisitor()]);
   const items = [];
   for (const w of watches) {
     const p = getProduct(String(w.product_id)); if (!p) continue;

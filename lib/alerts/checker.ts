@@ -1,3 +1,5 @@
+import { currentVisitor, withVisitor } from "../visitor";
+import { listVisitors } from "../db";
 import { query, run, parseWatchOpts, serializeWatchOpts } from "../db";
 import { getProduct } from "../catalog";
 import { analyze } from "../service";
@@ -9,7 +11,7 @@ import { getPrefs } from "../prefs";
 export const appUrl = (fallback?: string) => process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || fallback || "http://localhost:3000";
 /** Re-price every watched product (recording a snapshot), compare to the last checked price/target, and notify. */
 export async function checkWatches(origin?: string) {
-  const watches = await query("SELECT product_id, target, last_price, opts FROM watches");
+  const watches = await query("SELECT product_id, target, last_price, opts FROM watches WHERE visitor = ?", [currentVisitor()]);
   const out = [];
   const monthlyBudget = (await getPrefs()).monthlyBudget ?? null;
   for (const w of watches) {
@@ -37,11 +39,23 @@ export async function checkWatches(origin?: string) {
         body: `${best.retailer}: $${best.effectivePrice.toFixed(2)} (${decision.reason}). ${pending ? "Your PayPal order is ready — tap to approve." : autoBuy.status === "completed" ? `Paid with PayPal sandbox, order ${autoBuy.order_id}.` : autoBuy.note ?? ""}`,
         url: pending && autoBuy.approve_url ? autoBuy.approve_url : `${appUrl(origin).replace(/\/$/, "")}/#purchases` });
     }
-    await run("UPDATE watches SET last_price = ?, opts = ? WHERE product_id = ?", [best.effectivePrice, serializeWatchOpts(nextOpts), p.id]);
+    await run("UPDATE watches SET last_price = ?, opts = ? WHERE visitor = ? AND product_id = ?", [best.effectivePrice, serializeWatchOpts(nextOpts), currentVisitor(), p.id]);
     if (autoBuy) { out.push({ productId: p.id, price: best.effectivePrice, alerted: true, autoBuy, channels: autoBuyChannels }); continue; }
     if (!reasons.length) { out.push({ productId: p.id, price: best.effectivePrice, alerted: false }); continue; }
     const alert = buildAlert(p.id, p.name, best, prev, reasons, appUrl(origin));
     out.push({ productId: p.id, price: best.effectivePrice, alerted: true, alert, channels: await dispatch(alert) });
   }
   return out;
+}
+
+/** Cron entry point: run the watch + price-protection checks once per visitor, each with that visitor's own prefs, caps and channels. */
+export async function checkAllVisitors(origin?: string) {
+  const { checkProtection } = await import("../protection");
+  const visitors = await listVisitors();
+  const results: Array<Record<string, unknown>> = []; const protection: Array<Record<string, unknown>> = [];
+  for (const v of visitors) await withVisitor(v, async () => {
+    for (const r of await checkWatches(origin)) results.push({ ...r });
+    for (const r of await checkProtection(appUrl(origin))) protection.push({ ...r });
+  });
+  return { visitors: visitors.length, results, protection };
 }

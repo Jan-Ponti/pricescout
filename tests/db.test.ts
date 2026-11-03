@@ -11,7 +11,7 @@ describe("postgres SQL translation", () => {
   });
   it("handles explicit columns and literals", () => {
     expect(toPg("INSERT OR REPLACE INTO kv VALUES ('shopper_prefs', ?)")).toBe("INSERT INTO kv (k, v) VALUES ('shopper_prefs', $1) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v");
-    expect(toPg("INSERT OR REPLACE INTO watches (product_id, target) VALUES (?,?)")).toMatch(/ON CONFLICT \(product_id\) DO UPDATE SET target = EXCLUDED.target$/);
+    expect(toPg("INSERT OR REPLACE INTO watches (visitor, product_id, target) VALUES (?,?,?)")).toMatch(/ON CONFLICT \(visitor, product_id\) DO UPDATE SET target = EXCLUDED.target$/);
     expect(toPg("INSERT OR IGNORE INTO kv VALUES (?,?)")).toMatch(/ON CONFLICT \(k\) DO NOTHING$/);
   });
   it("leaves plain inserts alone", () => {
